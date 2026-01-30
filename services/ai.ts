@@ -1,15 +1,9 @@
-/// <reference types="vite/client" />
 import { GoogleGenAI, Type } from "@google/genai";
 import { GradingResult, Question, QuestionType } from "../types";
 
-// CHANGE: Use import.meta.env.VITE_API_KEY for Vite application
-const apiKey = import.meta.env.VITE_API_KEY;
-
-if (!apiKey) {
-  console.error("API KEY Missing! Please check your .env file or Cloudflare Environment Variables.");
-}
-
-const ai = new GoogleGenAI({ apiKey: apiKey || "" });
+// Follow strict guidelines: use process.env.API_KEY
+// Assumes process.env.API_KEY is available in the execution context
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Helper to clean JSON response from potential Markdown formatting
 const cleanJSON = (text: string) => {

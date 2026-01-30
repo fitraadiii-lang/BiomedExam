@@ -14,27 +14,28 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, onStar
 
   useEffect(() => {
     refreshExams();
-    const interval = setInterval(refreshExams, 60000); // Update every minute to check start times
+    const interval = setInterval(refreshExams, 15000); // Check every 15s from Cloud
     return () => clearInterval(interval);
   }, [user.id]);
 
-  const refreshExams = () => {
-    const allExams = DB.getExams();
+  const refreshExams = async () => {
+    const allExams = await DB.getExams();
     setExams(allExams.filter(e => e.isActive));
 
-    const mySubs = DB.getSubmissionsByStudent(user.id);
+    const mySubs = await DB.getSubmissionsByStudent(user.id);
     setCompletedExamIds(new Set(mySubs.map(s => s.examId)));
   };
 
-  const handleJoinByCode = (e: React.FormEvent) => {
+  const handleJoinByCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!accessCode) return;
     
-    const allExams = DB.getExams();
+    // Fetch latest exams to ensure validity
+    const allExams = await DB.getExams(); 
     const targetExam = allExams.find(ex => ex.accessCode === accessCode.trim().toUpperCase());
 
     if (!targetExam) {
-      alert("Kode ujian tidak valid.");
+      alert("Kode ujian tidak valid atau belum dipublish oleh Dosen.");
       return;
     }
 
@@ -62,11 +63,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, onStar
     }
 
     if (now > end) {
-        alert("Waktu ujian telah berakhir. Anda tidak dapat masuk.");
+        alert("Waktu ujian telah berakhir.");
         return;
     }
 
-    if (confirm(`Mulai ujian "${exam.courseName}: ${exam.title}"?`)) {
+    if (confirm(`Mulai ujian "${exam.courseName}"?`)) {
        onStartExam(exam.id);
     }
   };
@@ -78,26 +79,18 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, onStar
         <p className="text-gray-600">Semangat mengerjakan UTS dan UAS!</p>
       </div>
 
-      {/* Join By Code Section */}
       <div className="bg-white rounded-xl shadow-md p-6 mb-10 border border-green-100 relative overflow-hidden">
-         <div className="absolute top-0 right-0 w-32 h-32 bg-green-100 rounded-full -mr-16 -mt-16 opacity-50"></div>
          <div className="relative z-10 max-w-lg">
             <h2 className="text-xl font-bold text-green-900 mb-2">Masuk ke Ujian Khusus</h2>
-            <p className="text-gray-600 mb-4 text-sm">Masukkan kode unik yang diberikan oleh Dosen untuk mengakses soal ujian.</p>
             <form onSubmit={handleJoinByCode} className="flex gap-2">
                <input 
                  type="text" 
                  placeholder="Kode Ujian"
-                 className="flex-1 border-2 border-green-200 rounded-lg px-4 py-2 uppercase tracking-wider font-bold text-gray-700 focus:outline-none focus:border-green-500"
+                 className="flex-1 border-2 border-green-200 rounded-lg px-4 py-2 uppercase tracking-wider font-bold"
                  value={accessCode}
                  onChange={(e) => setAccessCode(e.target.value.toUpperCase())}
                />
-               <button 
-                 type="submit"
-                 className="bg-green-600 text-white font-bold px-6 py-2 rounded-lg hover:bg-green-700 transition-colors shadow-lg"
-               >
-                 Masuk
-               </button>
+               <button type="submit" className="bg-green-600 text-white font-bold px-6 py-2 rounded-lg">Masuk</button>
             </form>
          </div>
       </div>
@@ -131,48 +124,23 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, onStar
               <div className={`absolute top-0 right-0 px-3 py-1 text-xs font-bold text-white rounded-bl-lg ${exam.type === 'UTS' ? 'bg-blue-500' : 'bg-purple-500'}`}>
                 {exam.type}
               </div>
-              
               <h3 className="text-xl font-bold text-gray-900 mb-1">{exam.courseName}</h3>
               <p className="text-sm text-gray-500 mb-4">{exam.title}</p>
               
-              <div className="space-y-3 mb-6 flex-1 text-sm border-t border-b py-3 border-gray-50">
-                <div className="flex justify-between">
-                   <span className="text-gray-500">Mulai:</span>
-                   <span className="font-medium">{start.toLocaleString('id-ID', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</span>
-                </div>
-                <div className="flex justify-between">
-                   <span className="text-gray-500">Selesai:</span>
-                   <span className="font-medium text-red-600">{end.toLocaleString('id-ID', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</span>
-                </div>
-                 <div className="flex justify-between">
-                   <span className="text-gray-500">Soal:</span>
-                   <span className="font-medium">{exam.questions.length} Butir</span>
-                </div>
+              <div className="text-sm mb-4 space-y-1">
+                 <div>Mulai: {start.toLocaleString('id-ID', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</div>
+                 <div>Selesai: {end.toLocaleString('id-ID', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</div>
               </div>
 
-              <div className="flex items-center justify-between gap-3">
-                 <span className={`px-3 py-1.5 rounded text-xs font-bold ${statusColor}`}>
-                    {statusLabel}
-                 </span>
-                 
+              <div className="flex items-center justify-between gap-3 mt-auto">
+                 <span className={`px-3 py-1.5 rounded text-xs font-bold ${statusColor}`}>{statusLabel}</span>
                  {!isDone && canEnter && (
-                    <button 
-                        onClick={() => validateAndStart(exam)}
-                        className="bg-green-600 text-white font-bold py-1.5 px-4 rounded hover:bg-green-700 transition-colors text-sm"
-                    >
-                        Kerjakan
-                    </button>
+                    <button onClick={() => validateAndStart(exam)} className="bg-green-600 text-white font-bold py-1.5 px-4 rounded hover:bg-green-700 text-sm">Kerjakan</button>
                  )}
               </div>
             </div>
           );
         })}
-        
-        {exams.length === 0 && (
-          <div className="col-span-full text-center py-12">
-            <p className="text-gray-500">Belum ada ujian yang dijadwalkan.</p>
-          </div>
-        )}
       </div>
     </div>
   );
