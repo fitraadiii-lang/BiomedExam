@@ -1,7 +1,15 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+/// <reference types="vite/client" />
+import { GoogleGenAI, Type } from "@google/genai";
 import { GradingResult, Question, QuestionType } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// CHANGE: Use import.meta.env.VITE_API_KEY for Vite application
+const apiKey = import.meta.env.VITE_API_KEY;
+
+if (!apiKey) {
+  console.error("API KEY Missing! Please check your .env file or Cloudflare Environment Variables.");
+}
+
+const ai = new GoogleGenAI({ apiKey: apiKey || "" });
 
 // Helper to clean JSON response from potential Markdown formatting
 const cleanJSON = (text: string) => {
@@ -83,7 +91,7 @@ export const AIService = {
       console.error("AI Grading Error:", error);
       return {
         score: 0,
-        feedback: "Gagal menilai secara otomatis. Silakan nilai manual.",
+        feedback: "Gagal menilai secara otomatis. Pastikan API Key valid atau kuota mencukupi.",
       };
     }
   },
