@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Exam, ExamType, Question, QuestionType, Submission, ExamSession } from '../types';
+import { User, Exam, ExamType, Question, QuestionType, Submission, ExamSession, UserRole } from '../types';
 import { DB } from '../services/db';
 import { AIService } from '../services/ai';
 
@@ -48,6 +48,8 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const isAdmin = user.role === UserRole.ADMIN;
+
   useEffect(() => {
     loadData();
     // In Firebase, we could use onSnapshot for realtime updates instead of window storage events.
@@ -73,13 +75,24 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
 
   const loadData = async () => {
     const allExams = await DB.getExams();
-    setExams(allExams.filter(e => e.lecturerId === user.id));
     
-    // Fetch all submissions for exams owned by this lecturer
-    // Note: In a real app, optimize this query
+    // UPDATE: Jika Admin, tampilkan SEMUA ujian. Jika Dosen, hanya ujiannya sendiri.
+    if (isAdmin) {
+      setExams(allExams);
+    } else {
+      setExams(allExams.filter(e => e.lecturerId === user.id));
+    }
+    
+    // Fetch all submissions
     const allSubs = await DB.getSubmissions();
-    const myExamIds = new Set(allExams.filter(e => e.lecturerId === user.id).map(e => e.id));
-    setSubmissions(allSubs.filter(s => myExamIds.has(s.examId)));
+    
+    // Filter submissions: Admin sees ALL. Lecturer sees ONLY for their exams.
+    if (isAdmin) {
+       setSubmissions(allSubs);
+    } else {
+       const myExamIds = new Set(allExams.filter(e => e.lecturerId === user.id).map(e => e.id));
+       setSubmissions(allSubs.filter(s => myExamIds.has(s.examId)));
+    }
 
     const students = await DB.getStudents();
     setAllStudents(students);
@@ -136,7 +149,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
       description,
       courseName: course,
       type,
-      lecturerId: user.id,
+      lecturerId: user.id, // Jika Admin membuat, ID Admin tercatat sebagai pembuat
       lecturerName: user.name,
       questions,
       startTime: new Date(startTime).toISOString(),
@@ -345,7 +358,10 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Dashboard Dosen</h1>
+          <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+            Dashboard Dosen
+            {isAdmin && <span className="text-xs bg-slate-900 text-white px-2 py-1 rounded uppercase tracking-wide">Admin Access</span>}
+          </h1>
           <p className="text-gray-600">Selamat datang, {user.name}</p>
         </div>
         <div className="space-x-2">
@@ -376,7 +392,10 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                        <div className="font-bold">{exam.courseName}</div>
                      </div>
                      <div className="text-sm text-gray-500">{exam.title}</div>
-                     <div className="text-xs text-gray-400">Kode: <span className="font-mono bg-gray-100 px-1 rounded">{exam.accessCode}</span></div>
+                     <div className="flex gap-2 mt-1">
+                        <div className="text-xs text-gray-400">Kode: <span className="font-mono bg-gray-100 px-1 rounded text-gray-700 font-bold select-all">{exam.accessCode}</span></div>
+                        {isAdmin && <div className="text-xs bg-slate-100 px-1 rounded text-slate-500">Oleh: {exam.lecturerName}</div>}
+                     </div>
                    </td>
                    <td className="px-6 py-4 text-sm">
                       {new Date(exam.startTime).toLocaleString('id-ID')}
@@ -490,6 +509,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                        <span className="text-[10px] bg-gray-100 px-2 py-1 rounded font-mono">{exam.type}</span>
                     </div>
                     <p className="text-sm text-gray-500">{getExamSubmissions(exam.id).length} Mahasiswa mengumpulkan</p>
+                    {isAdmin && <p className="text-[10px] text-gray-400 mt-1">Oleh: {exam.lecturerName}</p>}
                     <div className="mt-4 pt-4 border-t flex justify-end">
                        <span className="text-green-600 text-sm font-bold">Buka Koreksi →</span>
                     </div>
@@ -506,6 +526,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="bg-white rounded border h-[600px] overflow-y-auto">
                            <div className="p-3 bg-gray-50 border-b font-bold text-sm">Daftar Mahasiswa</div>
+                           {getExamSubmissions(selectedExamIdForGrading).length === 0 && <div className="p-4 text-center text-sm text-gray-400">Belum ada pengumpulan.</div>}
                            {getExamSubmissions(selectedExamIdForGrading).map(sub => (
                               <div key={sub.id} onClick={() => setSelectedSubmission(sub)} className={`p-3 border-b cursor-pointer flex justify-between items-center ${selectedSubmission?.id === sub.id ? 'bg-green-50 border-l-4 border-green-500' : 'hover:bg-gray-50'}`}>
                                  <div>

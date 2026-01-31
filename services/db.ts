@@ -27,6 +27,17 @@ const KEYS = {
   CURRENT_USER: 'biomed_current_user',
 };
 
+// --- OFFLINE MODE CONTROL ---
+let forceOffline = false;
+
+export const setForceOffline = (enabled: boolean) => {
+  forceOffline = enabled;
+  console.log(`Offline Mode forced: ${enabled}`);
+};
+
+// Helper to check effective mode
+const isOffline = () => !isFirebaseConfigured || forceOffline;
+
 // Helper to remove undefined values (Firestore rejects undefined)
 const sanitize = <T>(data: T): T => {
   return JSON.parse(JSON.stringify(data));
@@ -65,6 +76,8 @@ const handleFirebaseError = (e: any) => {
 
 // --- HYBRID DATABASE SERVICE ---
 export const DB = {
+  isOfflineMode: () => isOffline(),
+
   // Session selalu di LocalStorage (Browser Session)
   getCurrentUser: (): User | null => {
     const data = localStorage.getItem(KEYS.CURRENT_USER);
@@ -81,7 +94,7 @@ export const DB = {
 
   // === AUTH & USERS ===
   login: async (email: string): Promise<User | undefined> => {
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
        return LS.find<User>(KEYS.LS_USERS, u => u.email === email);
     }
     try {
@@ -90,6 +103,7 @@ export const DB = {
       if (querySnapshot.empty) return undefined;
       return querySnapshot.docs[0].data() as User;
     } catch (e) {
+      // Jika error auth/config, biarkan UI handle untuk switch offline
       handleFirebaseError(e);
       return undefined;
     }
@@ -100,7 +114,7 @@ export const DB = {
     const existing = await DB.login(user.email);
     if (existing) throw new Error('User already exists');
 
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       LS.add(KEYS.LS_USERS, user);
       return user;
     }
@@ -115,7 +129,7 @@ export const DB = {
   },
   
   getStudents: async (): Promise<User[]> => {
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       return LS.filter<User>(KEYS.LS_USERS, u => u.role === UserRole.STUDENT);
     }
     try {
@@ -130,7 +144,7 @@ export const DB = {
 
   // === EXAMS ===
   saveExam: async (exam: Exam) => {
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       LS.add(KEYS.LS_EXAMS, exam);
       return;
     }
@@ -142,7 +156,7 @@ export const DB = {
   },
 
   getExams: async (): Promise<Exam[]> => {
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       return LS.get<Exam>(KEYS.LS_EXAMS);
     }
     try {
@@ -156,7 +170,7 @@ export const DB = {
   },
 
   getExamById: async (id: string): Promise<Exam | undefined> => {
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       return LS.find<Exam>(KEYS.LS_EXAMS, e => e.id === id);
     }
     try {
@@ -170,7 +184,7 @@ export const DB = {
   },
 
   deleteExam: async (id: string) => {
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       LS.remove(KEYS.LS_EXAMS, id);
       return;
     }
@@ -183,7 +197,7 @@ export const DB = {
 
   // === SUBMISSIONS ===
   saveSubmission: async (submission: Submission) => {
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       LS.add(KEYS.LS_SUBMISSIONS, submission);
       return;
     }
@@ -195,7 +209,7 @@ export const DB = {
   },
 
   getSubmissions: async (): Promise<Submission[]> => {
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       return LS.get<Submission>(KEYS.LS_SUBMISSIONS);
     }
     try {
@@ -208,7 +222,7 @@ export const DB = {
   },
 
   getSubmissionsByExam: async (examId: string): Promise<Submission[]> => {
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       return LS.filter<Submission>(KEYS.LS_SUBMISSIONS, s => s.examId === examId);
     }
     try {
@@ -222,7 +236,7 @@ export const DB = {
   },
   
   getSubmissionsByStudent: async (studentId: string): Promise<Submission[]> => {
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       return LS.filter<Submission>(KEYS.LS_SUBMISSIONS, s => s.studentId === studentId);
     }
     try {
@@ -238,7 +252,7 @@ export const DB = {
   // === LIVE SESSIONS ===
   updateSession: async (session: ExamSession) => {
     const sessionId = `${session.examId}_${session.studentId}`;
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       // Mock session update in LS
       const sessions = LS.get<ExamSession>(KEYS.LS_SESSIONS);
       const idx = sessions.findIndex(s => `${s.examId}_${s.studentId}` === sessionId);
@@ -252,7 +266,7 @@ export const DB = {
   },
 
   getSessionsByExam: async (examId: string): Promise<ExamSession[]> => {
-    if (!isFirebaseConfigured) {
+    if (isOffline()) {
       return LS.filter<ExamSession>(KEYS.LS_SESSIONS, s => s.examId === examId);
     }
     try {

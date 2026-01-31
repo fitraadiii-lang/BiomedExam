@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    base: './', // PENTING: Agar aset dimuat relatif dan bisa jalan di GitHub Pages/Subfolder
     define: {
       // Polyfill process.env.API_KEY for the browser
       'process.env.API_KEY': JSON.stringify(env.VITE_API_KEY)
