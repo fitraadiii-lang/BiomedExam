@@ -10,6 +10,7 @@ import { ExamRunner } from './components/ExamRunner';
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [activeExamId, setActiveExamId] = useState<string | null>(null);
+  const [activeExam, setActiveExam] = useState<Exam | null>(null);
   
   // State khusus Admin untuk pindah view
   const [adminViewMode, setAdminViewMode] = useState<'ADMIN_DASHBOARD' | 'LECTURER_VIEW'>('ADMIN_DASHBOARD');
@@ -18,6 +19,28 @@ export default function App() {
     const currentUser = DB.getCurrentUser();
     if (currentUser) setUser(currentUser);
   }, []);
+
+  useEffect(() => {
+    const fetchExam = async () => {
+      if (activeExamId && user?.role === UserRole.STUDENT) {
+        try {
+          const exam = await DB.getExamById(activeExamId);
+          if (exam) {
+            setActiveExam(exam);
+          } else {
+            console.error("Exam not found");
+            setActiveExamId(null);
+          }
+        } catch (error) {
+          console.error("Error loading exam:", error);
+          setActiveExamId(null);
+        }
+      } else {
+        setActiveExam(null);
+      }
+    };
+    fetchExam();
+  }, [activeExamId, user]);
 
   const handleLogin = () => {
     const currentUser = DB.getCurrentUser();
@@ -39,9 +62,20 @@ export default function App() {
 
   // Jika Mahasiswa sedang ujian
   if (activeExamId && user.role === UserRole.STUDENT) {
-    const exam = DB.getExamById(activeExamId);
-    if (!exam) return <div>Error loading exam</div>;
-    return <ExamRunner user={user} exam={exam} onFinish={() => setActiveExamId(null)} />;
+    if (!activeExam) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+          <div className="text-center">
+            <svg className="animate-spin h-10 w-10 text-green-600 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p className="text-gray-500 font-medium">Memuat Data Ujian...</p>
+          </div>
+        </div>
+      );
+    }
+    return <ExamRunner user={user} exam={activeExam} onFinish={() => setActiveExamId(null)} />;
   }
 
   return (

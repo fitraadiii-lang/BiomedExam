@@ -8,6 +8,10 @@ interface AuthProps {
   onLogin: () => void;
 }
 
+// Konfigurasi Super Admin & Kode Dosen
+const SUPER_ADMIN_EMAIL = 'fitraadi@unkaha.ac.id';
+const LECTURER_SECRET_CODE = 'UNKAHA'; // Kode rahasia untuk daftar jadi Dosen
+
 export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   const [loading, setLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -17,6 +21,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   const [isRegistering, setIsRegistering] = useState(false);
   const [regName, setRegName] = useState('');
   const [regRole, setRegRole] = useState<UserRole>(UserRole.STUDENT);
+  const [regLecturerCode, setRegLecturerCode] = useState(''); // State untuk kode verifikasi dosen
   const [regEmail, setRegEmail] = useState('');
   const [regUid, setRegUid] = useState('');
 
@@ -28,7 +33,22 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       
-      // Cek apakah user sudah terdaftar di database kita
+      // 1. Cek Super Admin Hardcoded
+      if (user.email === SUPER_ADMIN_EMAIL) {
+         // Force register/update as ADMIN
+         const adminUser = await DB.register({
+            id: user.uid,
+            email: user.email,
+            name: user.displayName || 'Super Admin',
+            role: UserRole.ADMIN,
+            avatarUrl: user.photoURL || undefined
+         });
+         DB.setCurrentUser(adminUser);
+         onLogin();
+         return;
+      }
+
+      // 2. Cek User Biasa
       const existingUser = await DB.login(user.email || '');
       
       if (existingUser) {
@@ -88,6 +108,12 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
     e.preventDefault();
     if (!regName) return;
 
+    // Validasi Kode Dosen
+    if (regRole === UserRole.LECTURER && regLecturerCode !== LECTURER_SECRET_CODE) {
+        alert("Kode Verifikasi Dosen SALAH.\nHubungi Admin Prodi jika Anda benar-benar Dosen.");
+        return;
+    }
+
     setLoading(true);
     try {
       const newUser = await DB.register({
@@ -114,7 +140,6 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         <div className="absolute -bottom-20 -left-20 w-80 h-80 bg-green-600 rounded-full blur-[100px] opacity-20"></div>
         <div className="relative z-10">
            <div className="flex items-center gap-3 mb-6">
-             {/* Logo dihapus sesuai permintaan */}
              <div className="font-bold tracking-wider text-sm">UNIVERSITAS KARYA HUSADA</div>
            </div>
            
@@ -239,7 +264,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                       <label className="block text-sm font-semibold text-gray-700 mb-2">Daftar Sebagai</label>
                       <div className="grid grid-cols-2 gap-4">
                          <div 
-                           onClick={() => setRegRole(UserRole.STUDENT)}
+                           onClick={() => { setRegRole(UserRole.STUDENT); setRegLecturerCode(''); }}
                            className={`cursor-pointer p-4 rounded-xl border-2 transition-all text-center ${regRole === UserRole.STUDENT ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 hover:border-green-200'}`}
                          >
                             <div className="font-bold text-sm">MAHASISWA</div>
@@ -254,6 +279,21 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                          </div>
                       </div>
                    </div>
+
+                   {/* Field Tambahan untuk Proteksi Dosen */}
+                   {regRole === UserRole.LECTURER && (
+                      <div className="animate-fade-in bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                         <label className="block text-xs font-bold text-yellow-800 mb-1">Kode Verifikasi Dosen (Proteksi)</label>
+                         <input 
+                            type="password"
+                            value={regLecturerCode}
+                            onChange={e => setRegLecturerCode(e.target.value)}
+                            className="w-full border-gray-300 border p-2 rounded text-sm focus:ring-2 focus:ring-yellow-500 outline-none"
+                            placeholder="Masukkan Kode Rahasia"
+                         />
+                         <p className="text-[10px] text-yellow-700 mt-1">Kode: <b>UNKAHA</b></p>
+                      </div>
+                   )}
 
                    <button type="submit" disabled={loading} className="w-full bg-green-600 text-white font-bold py-3.5 rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 transition-all mt-4">
                       {loading ? 'Menyimpan...' : 'Simpan & Lanjutkan'}

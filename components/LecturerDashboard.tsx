@@ -13,11 +13,13 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [allStudents, setAllStudents] = useState<User[]>([]);
   
-  // Create Exam State
+  // Create/Edit Exam State
+  const [editingExamId, setEditingExamId] = useState<string | null>(null); // State untuk mode edit
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [course, setCourse] = useState('');
   const [type, setType] = useState<ExamType>(ExamType.UTS);
+  const [accessCode, setAccessCode] = useState(''); // Untuk menyimpan kode lama saat edit
   
   // Time Scheduling State
   const [startTime, setStartTime] = useState('');
@@ -37,7 +39,6 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
   const [selectedExamIdForGrading, setSelectedExamIdForGrading] = useState<string | null>(null);
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
   const [gradingLoading, setGradingLoading] = useState<number | null>(null);
-  const [showRecapModal, setShowRecapModal] = useState(false);
   
   // Live Monitor State
   const [showLiveMonitor, setShowLiveMonitor] = useState(false);
@@ -52,8 +53,6 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
 
   useEffect(() => {
     loadData();
-    // In Firebase, we could use onSnapshot for realtime updates instead of window storage events.
-    // For now, simple polling can emulate "sync" if we wanted, or just manual refresh.
   }, []);
 
   // Poll for live monitor updates when modal is open
@@ -125,13 +124,75 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
     }
 
     setQuestions([...questions, newQ]);
+    
+    // Reset Form
     setQText('');
     setQRefAnswer('');
     setQOptions(['', '', '', '']);
-    alert("Soal ditambahkan ke Draft!");
+    setQCorrect(0);
+    // alert("Soal ditambahkan ke Draft!"); // Optional feedback
   };
 
-  const handleCreateExam = async () => {
+  const deleteQuestion = (idx: number) => {
+    const newQ = [...questions];
+    newQ.splice(idx, 1);
+    setQuestions(newQ);
+  };
+
+  const editQuestionInDraft = (idx: number) => {
+    const q = questions[idx];
+    setQText(q.text);
+    setQType(q.type);
+    setQPoints(q.points);
+
+    if (q.type === QuestionType.MULTIPLE_CHOICE) {
+        setQOptions(q.options || ['', '', '', '']);
+        setQCorrect(q.correctOptionIndex || 0);
+    } else {
+        setQRefAnswer(q.referenceAnswer || '');
+    }
+
+    // Remove the question from the array so the user can "update" it by re-adding
+    // This is a simple UX pattern for this case
+    const newQ = [...questions];
+    newQ.splice(idx, 1);
+    setQuestions(newQ);
+  };
+
+  const handleEditExam = (exam: Exam) => {
+    setEditingExamId(exam.id);
+    setTitle(exam.title);
+    setDescription(exam.description);
+    setCourse(exam.courseName);
+    setType(exam.type);
+    setQuestions(exam.questions);
+    setAccessCode(exam.accessCode);
+    
+    // Convert ISO to Datetime Local value (YYYY-MM-DDTHH:mm)
+    const toLocalISO = (iso: string) => {
+       const d = new Date(iso);
+       const pad = (n: number) => n < 10 ? '0'+n : n;
+       return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    
+    setStartTime(toLocalISO(exam.startTime));
+    setEndTime(toLocalISO(exam.endTime));
+    
+    setActiveTab('create');
+  };
+
+  const cancelEdit = () => {
+     setEditingExamId(null);
+     setTitle('');
+     setDescription('');
+     setCourse('');
+     setStartTime('');
+     setEndTime('');
+     setQuestions([]);
+     setAccessCode('');
+  };
+
+  const handleCreateOrUpdateExam = async () => {
     if (!startTime || !endTime) {
       alert("Harap tentukan Waktu Mulai dan Waktu Selesai ujian.");
       return;
@@ -142,31 +203,37 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
       return;
     }
 
+    // Logic Preservasi Owner: Jika sedang edit, ambil owner asli dari object exam yang ada
+    // Agar jika Admin mengedit, ID dosen tidak tertimpa ID Admin
+    const originalExam = editingExamId ? exams.find(e => e.id === editingExamId) : null;
+    
+    const examId = editingExamId || Date.now().toString();
+    const code = editingExamId ? accessCode : generateCode();
+    const createdDate = originalExam ? originalExam.createdAt : new Date().toISOString();
+
     const newExam: Exam = {
-      id: Date.now().toString(),
-      accessCode: generateCode(),
+      id: examId,
+      accessCode: code,
       title,
       description,
       courseName: course,
       type,
-      lecturerId: user.id, // Jika Admin membuat, ID Admin tercatat sebagai pembuat
-      lecturerName: user.name,
+      lecturerId: originalExam ? originalExam.lecturerId : user.id, 
+      lecturerName: originalExam ? originalExam.lecturerName : user.name,
       questions,
       startTime: new Date(startTime).toISOString(),
       endTime: new Date(endTime).toISOString(),
       isActive: true,
-      createdAt: new Date().toISOString()
+      createdAt: createdDate
     };
     
     await DB.saveExam(newExam);
     await loadData();
-    alert(`Ujian berhasil dibuat dan tersimpan di Cloud!\n\nKODE AKSES: ${newExam.accessCode}`);
-    setQuestions([]);
-    setTitle('');
-    setDescription('');
-    setCourse('');
-    setStartTime('');
-    setEndTime('');
+    
+    const action = editingExamId ? "Diupdate" : "Dibuat";
+    alert(`Ujian berhasil ${action}!\n\nKODE AKSES: ${newExam.accessCode}`);
+    
+    cancelEdit(); // Reset form
     setActiveTab('my-exams');
   };
 
@@ -198,8 +265,9 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
       const tomorrowEnd = new Date(tomorrow);
       tomorrowEnd.setHours(10, 0, 0, 0);
       
-      // Format to YYYY-MM-DDTHH:mm
-      const fmt = (d: Date) => d.toISOString().slice(0, 16);
+      const pad = (n: number) => n < 10 ? '0'+n : n;
+      const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
       setStartTime(fmt(tomorrow));
       setEndTime(fmt(tomorrowEnd));
   };
@@ -365,8 +433,8 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
           <p className="text-gray-600">Selamat datang, {user.name}</p>
         </div>
         <div className="space-x-2">
-          <button onClick={() => setActiveTab('my-exams')} className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'my-exams' ? 'bg-green-600 text-white' : 'bg-white text-gray-600 border'}`}>Bank Ujian</button>
-          <button onClick={() => setActiveTab('create')} className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'create' ? 'bg-green-600 text-white' : 'bg-white text-gray-600 border'}`}>Buat Ujian</button>
+          <button onClick={() => { setActiveTab('my-exams'); cancelEdit(); }} className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'my-exams' ? 'bg-green-600 text-white' : 'bg-white text-gray-600 border'}`}>Bank Ujian</button>
+          <button onClick={() => { setActiveTab('create'); cancelEdit(); }} className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'create' ? 'bg-green-600 text-white' : 'bg-white text-gray-600 border'}`}>Buat Ujian</button>
           <button onClick={() => { setActiveTab('submissions'); setSelectedExamIdForGrading(null); setSelectedSubmission(null); }} className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'submissions' ? 'bg-green-600 text-white' : 'bg-white text-gray-600 border'}`}>Monitoring & Nilai</button>
         </div>
       </div>
@@ -405,6 +473,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                    </td>
                    <td className="px-6 py-4 text-right text-sm space-x-2">
                       <button onClick={() => { setLiveMonitorExam(exam); setShowLiveMonitor(true); }} className="text-blue-600 hover:underline">Monitor</button>
+                      <button onClick={() => handleEditExam(exam)} className="text-orange-600 hover:underline font-bold">Edit</button>
                       <button onClick={() => handleToggleActive(exam)} className="text-indigo-600 hover:underline">{exam.isActive ? 'Stop' : 'Publish'}</button>
                       <button onClick={() => handleDeleteExam(exam.id)} className="text-red-600 hover:underline">Hapus</button>
                    </td>
@@ -419,17 +488,26 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
       {activeTab === 'create' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
              <div className="lg:col-span-1 space-y-6">
-                {/* Template Shortcut */}
-                <div className="bg-green-50 p-4 rounded-xl border border-green-200">
-                   <p className="text-sm font-bold text-green-800 mb-2">Jalan Pintas (Template)</p>
-                   <div className="flex gap-2">
-                      <button onClick={() => applyTemplate('UTS')} className="flex-1 bg-blue-600 text-white text-sm py-2 rounded font-medium hover:bg-blue-700">Set UTS</button>
-                      <button onClick={() => applyTemplate('UAS')} className="flex-1 bg-purple-600 text-white text-sm py-2 rounded font-medium hover:bg-purple-700">Set UAS</button>
+                {/* Template Shortcut (Only show if not editing) */}
+                {!editingExamId && (
+                    <div className="bg-green-50 p-4 rounded-xl border border-green-200">
+                    <p className="text-sm font-bold text-green-800 mb-2">Jalan Pintas (Template)</p>
+                    <div className="flex gap-2">
+                        <button onClick={() => applyTemplate('UTS')} className="flex-1 bg-blue-600 text-white text-sm py-2 rounded font-medium hover:bg-blue-700">Set UTS</button>
+                        <button onClick={() => applyTemplate('UAS')} className="flex-1 bg-purple-600 text-white text-sm py-2 rounded font-medium hover:bg-purple-700">Set UAS</button>
+                    </div>
+                    </div>
+                )}
+                
+                {editingExamId && (
+                   <div className="bg-orange-50 p-4 rounded-xl border border-orange-200 flex justify-between items-center">
+                       <span className="text-orange-800 font-bold text-sm">Mode Edit Ujian</span>
+                       <button onClick={cancelEdit} className="text-xs bg-white border px-2 py-1 rounded text-gray-600 hover:bg-gray-100">Batal Edit</button>
                    </div>
-                </div>
+                )}
 
                 <div className="bg-white p-6 rounded-xl shadow-sm border">
-                    <h2 className="font-bold mb-4">Setting Ujian</h2>
+                    <h2 className="font-bold mb-4">{editingExamId ? 'Edit Data Ujian' : 'Setting Ujian Baru'}</h2>
                     {/* Inputs */}
                     <div className="mb-2">
                         <label className="text-xs text-gray-500 block">Tipe Ujian</label>
@@ -460,7 +538,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                 </div>
                 {/* Manual Input */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border">
-                   <h3 className="font-bold text-sm mb-2">Input Manual</h3>
+                   <h3 className="font-bold text-sm mb-2">Input Manual / Edit Soal</h3>
                    <textarea className="w-full p-2 border rounded mb-2" placeholder="Pertanyaan" value={qText} onChange={e=>setQText(e.target.value)} />
                    <div className="flex gap-2 mb-2">
                       <select className="border p-1 rounded" value={qType} onChange={e=>setQType(e.target.value as any)}>
@@ -473,7 +551,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                       <div key={i} className="flex gap-1 mb-1"><input type="radio" checked={qCorrect===i} onChange={()=>setQCorrect(i)} /><input className="border w-full p-1 text-sm" value={o} onChange={e=>{const n=[...qOptions];n[i]=e.target.value;setQOptions(n)}} placeholder={`Opsi ${i+1}`} /></div>
                    ))}
                    {qType === QuestionType.ESSAY && <textarea className="w-full border p-2 mb-2 bg-yellow-50 text-sm" placeholder="Kunci Jawaban (Untuk AI)" value={qRefAnswer} onChange={e=>setQRefAnswer(e.target.value)} />}
-                   <button onClick={addQuestion} className="w-full bg-gray-100 p-2 rounded text-sm font-bold hover:bg-gray-200">Tambah ke Draft</button>
+                   <button onClick={addQuestion} className="w-full bg-gray-100 p-2 rounded text-sm font-bold hover:bg-gray-200">Tambah ke Draft / Update Soal</button>
                 </div>
              </div>
              <div className="lg:col-span-2">
@@ -483,17 +561,25 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                         {questions.length === 0 ? (
                            <div className="text-center text-gray-400 py-10">Belum ada soal. Upload PDF atau input manual.</div>
                         ) : questions.map((q,i)=>(
-                           <div key={i} className="mb-2 p-3 bg-white border rounded hover:shadow-sm">
-                              <div className="flex justify-between">
+                           <div key={i} className="mb-2 p-3 bg-white border rounded hover:shadow-sm relative group">
+                              <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white px-2 py-1 rounded shadow-sm border">
+                                  <button onClick={() => editQuestionInDraft(i)} className="text-blue-500 hover:text-blue-700 font-bold text-xs flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                    Edit
+                                  </button>
+                                  <div className="w-px bg-gray-300 h-4"></div>
+                                  <button onClick={() => deleteQuestion(i)} className="text-red-500 hover:text-red-700 font-bold text-xs">Hapus</button>
+                              </div>
+                              <div className="flex justify-between pr-20">
                                  <div className="font-bold text-sm">#{i+1} {q.text}</div>
-                                 <div className="text-xs font-bold text-gray-500">{q.points} Poin</div>
+                                 <div className="text-xs font-bold text-gray-500 whitespace-nowrap">{q.points} Poin</div>
                               </div>
                               <div className="text-xs text-gray-500 mt-1">{q.type === QuestionType.MULTIPLE_CHOICE ? 'Pilihan Ganda' : 'Esai'}</div>
                            </div>
                         ))}
                     </div>
-                    <button onClick={handleCreateExam} disabled={questions.length===0} className="w-full bg-green-600 text-white py-3 rounded font-bold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">
-                       Simpan & Terbitkan Ujian
+                    <button onClick={handleCreateOrUpdateExam} disabled={questions.length===0} className="w-full bg-green-600 text-white py-3 rounded font-bold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                       {editingExamId ? 'Update & Simpan Perubahan' : 'Simpan & Terbitkan Ujian'}
                     </button>
                 </div>
              </div>
