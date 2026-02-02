@@ -35,11 +35,15 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
   const [qOptions, setQOptions] = useState<string[]>(['', '', '', '']);
   const [qCorrect, setQCorrect] = useState(0);
   const [qRefAnswer, setQRefAnswer] = useState('');
+  
+  // Refs untuk Scroll
+  const questionFormRef = useRef<HTMLDivElement>(null);
 
   // Grading & Monitoring State
   const [selectedExamIdForGrading, setSelectedExamIdForGrading] = useState<string | null>(null);
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
   const [gradingLoading, setGradingLoading] = useState<number | null>(null);
+  const [showRecapModal, setShowRecapModal] = useState(false); // Modal Rekap Nilai
   
   // Live Monitor State
   const [showLiveMonitor, setShowLiveMonitor] = useState(false);
@@ -169,6 +173,11 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
     }
 
     setEditingQuestionIndex(idx);
+    
+    // Scroll ke form agar user tahu sedang edit
+    if (questionFormRef.current) {
+        questionFormRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   };
 
   const handleEditExam = (exam: Exam) => {
@@ -370,11 +379,8 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
       return;
     }
 
-    // 1. Calculate Total Possible Score for the Exam
-    // Ini digunakan untuk normalisasi nilai ke range 0-100
-    const maxExamPoints = exam?.questions.reduce((sum, q) => sum + q.points, 0) || 1; // Avoid divide by zero
+    const maxExamPoints = exam?.questions.reduce((sum, q) => sum + q.points, 0) || 1;
 
-    // 2. Generate XML Spreadsheet (Excel 2003 format) which supports multiple sheets
     // Header XML
     let xmlContent = `<?xml version="1.0"?>
     <?mso-application progid="Excel.Sheet"?>
@@ -398,69 +404,62 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
         </Style>
       </Styles>`;
 
-    // --- SHEET 1: REKAP NILAI (No, NIM, Nama, Nilai 0-100) ---
-    // SESUAI PERMINTAAN: HANYA KOLOM PENTING
-    xmlContent += `<Worksheet ss:Name="REKAP NILAI (0-100)"><Table>`;
-    
-    // Header Row
+    // --- SHEET 1: REKAP DETAIL ---
+    xmlContent += `<Worksheet ss:Name="DETAIL_BIOMED"><Table>`;
     xmlContent += `<Row>
-      <Cell ss:StyleID="sHeader"><Data ss:Type="String">No</Data></Cell>
       <Cell ss:StyleID="sHeader"><Data ss:Type="String">NIM</Data></Cell>
-      <Cell ss:StyleID="sHeader"><Data ss:Type="String">NAMA</Data></Cell>
-      <Cell ss:StyleID="sHeader"><Data ss:Type="String">NILAI AKHIR</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Nama Mahasiswa</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Waktu Submit</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Status Koreksi</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Pelanggaran</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Total Nilai (0-100)</Data></Cell>
     </Row>`;
 
-    // Data Rows
-    examSubs.forEach((sub, index) => {
-        // Rumus Konversi: (Skor Mahasiswa / Total Poin Ujian) * 100
-        const finalScore = ((sub.totalScore / maxExamPoints) * 100);
-        
+    examSubs.forEach((sub) => {
+        const finalScore = getNormalizedScore(sub.totalScore, sub.examId);
+        const submitTime = new Date(sub.submittedAt).toLocaleString('id-ID'); 
+        const status = sub.isGraded ? "Sudah Dinilai" : "Belum Dinilai";
+
         xmlContent += `<Row>
-          <Cell ss:StyleID="sData"><Data ss:Type="Number">${index + 1}</Data></Cell>
           <Cell ss:StyleID="sData"><Data ss:Type="String">${sub.studentNim || '-'}</Data></Cell>
           <Cell ss:StyleID="sData"><Data ss:Type="String">${sub.studentName}</Data></Cell>
-          <Cell ss:StyleID="sData"><Data ss:Type="Number">${finalScore.toFixed(2)}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="String">${submitTime}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="String">${status}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="Number">${sub.violationCount || 0}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="Number">${finalScore}</Data></Cell>
         </Row>`;
     });
 
     xmlContent += `</Table></Worksheet>`;
 
-    // --- SHEET 2: DETAIL LENGKAP (Backup) ---
-    xmlContent += `<Worksheet ss:Name="DETAIL & LOG"><Table>`;
+    // --- SHEET 2: REKAP NILAI AKHIR (NO, NIM, NAMA, NILAI AKHIR) ---
+    xmlContent += `<Worksheet ss:Name="NILAI_FINAL"><Table>`;
     xmlContent += `<Row>
-      <Cell ss:StyleID="sHeader"><Data ss:Type="String">No</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">NO</Data></Cell>
       <Cell ss:StyleID="sHeader"><Data ss:Type="String">NIM</Data></Cell>
-      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Nama</Data></Cell>
-      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Waktu Submit</Data></Cell>
-      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Status Koreksi</Data></Cell>
-      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Pelanggaran</Data></Cell>
-      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Poin Mentah (Max ${maxExamPoints})</Data></Cell>
-      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Nilai Akhir (1-100)</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">NAMA</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">NILAI AKHIR</Data></Cell>
     </Row>`;
 
     examSubs.forEach((sub, index) => {
-        const finalScore = ((sub.totalScore / maxExamPoints) * 100);
-        const status = sub.isGraded ? "Sudah Dinilai" : "Belum/Sedang Dinilai";
-
-        xmlContent += `<Row>
-          <Cell ss:StyleID="sData"><Data ss:Type="Number">${index + 1}</Data></Cell>
-          <Cell ss:StyleID="sData"><Data ss:Type="String">${sub.studentNim || '-'}</Data></Cell>
-          <Cell ss:StyleID="sData"><Data ss:Type="String">${sub.studentName}</Data></Cell>
-          <Cell ss:StyleID="sData"><Data ss:Type="String">${new Date(sub.submittedAt).toLocaleString('id-ID')}</Data></Cell>
-          <Cell ss:StyleID="sData"><Data ss:Type="String">${status}</Data></Cell>
-          <Cell ss:StyleID="sData"><Data ss:Type="Number">${sub.violationCount || 0}</Data></Cell>
-          <Cell ss:StyleID="sData"><Data ss:Type="Number">${sub.totalScore}</Data></Cell>
-          <Cell ss:StyleID="sData"><Data ss:Type="Number">${finalScore.toFixed(2)}</Data></Cell>
-        </Row>`;
+      const finalScore = getNormalizedScore(sub.totalScore, sub.examId);
+      xmlContent += `<Row>
+        <Cell ss:StyleID="sData"><Data ss:Type="Number">${index + 1}</Data></Cell>
+        <Cell ss:StyleID="sData"><Data ss:Type="String">${sub.studentNim || '-'}</Data></Cell>
+        <Cell ss:StyleID="sData"><Data ss:Type="String">${sub.studentName}</Data></Cell>
+        <Cell ss:StyleID="sData"><Data ss:Type="Number">${finalScore}</Data></Cell>
+      </Row>`;
     });
 
-    xmlContent += `</Table></Worksheet></Workbook>`;
+    xmlContent += `</Table></Worksheet>`;
+    
+    xmlContent += `</Workbook>`;
 
     const blob = new Blob([xmlContent], { type: 'application/vnd.ms-excel' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `REKAP_${exam?.courseName.replace(/\s+/g, '_')}.xls`;
+    link.download = `REKAP_NILAI_${exam?.courseName.replace(/\s+/g, '_')}.xls`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -580,7 +579,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
 
       {activeTab === 'create' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-             <div className="lg:col-span-1 space-y-6">
+             <div className="lg:col-span-1 space-y-6" ref={questionFormRef}>
                 {/* Template Shortcut (Only show if not editing) */}
                 {!editingExamId && (
                     <div className="bg-green-50 p-4 rounded-xl border border-green-200">
@@ -667,13 +666,14 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                            <div className="text-center text-gray-400 py-10">Belum ada soal. Upload PDF atau input manual.</div>
                         ) : questions.map((q,i)=>(
                            <div key={i} className={`mb-2 p-3 bg-white border rounded hover:shadow-sm relative group ${editingQuestionIndex === i ? 'ring-2 ring-orange-300 border-orange-300' : ''}`}>
-                              <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white px-2 py-1 rounded shadow-sm border">
-                                  <button onClick={() => editQuestionInDraft(i)} className="text-blue-500 hover:text-blue-700 font-bold text-xs flex items-center gap-1">
+                              {/* PERBAIKAN: z-index ditingkatkan agar tombol Edit bisa diklik */}
+                              <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white px-2 py-1 rounded shadow-sm border z-20">
+                                  <button type="button" onClick={(e) => {e.stopPropagation(); editQuestionInDraft(i);}} className="text-blue-500 hover:text-blue-700 font-bold text-xs flex items-center gap-1 cursor-pointer">
                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                     Edit
                                   </button>
                                   <div className="w-px bg-gray-300 h-4"></div>
-                                  <button onClick={() => deleteQuestion(i)} className="text-red-500 hover:text-red-700 font-bold text-xs">Hapus</button>
+                                  <button type="button" onClick={(e) => {e.stopPropagation(); deleteQuestion(i);}} className="text-red-500 hover:text-red-700 font-bold text-xs cursor-pointer">Hapus</button>
                               </div>
                               <div className="flex justify-between pr-20">
                                  <div className="font-bold text-sm">#{i+1} {q.text}</div>
@@ -709,8 +709,15 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                  <div className="col-span-full">
                      <div className="flex justify-between items-center mb-4">
                         <button onClick={() => {setSelectedExamIdForGrading(null); setSelectedSubmission(null)}} className="text-gray-500 hover:text-gray-800">← Kembali ke Daftar Ujian</button>
-                        <div className="space-x-2">
-                           <button onClick={handleExportXLS} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-green-700">Download Excel (Nilai)</button>
+                        <div className="space-x-2 flex">
+                           <button onClick={() => setShowRecapModal(true)} className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-blue-700 flex items-center gap-2">
+                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                               Lihat Tabel Rekap
+                           </button>
+                           <button onClick={handleExportXLS} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-green-700 flex items-center gap-2">
+                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                               Download Excel (Nilai)
+                           </button>
                         </div>
                      </div>
                      
@@ -795,7 +802,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                               </div>
                            ) : (
                               <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                                 <svg className="w-16 h-16 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                 <svg className="w-16 h-16 mb-4 opacity-50" fill="none" viewBox="0 0 0 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                  <p>Pilih mahasiswa dari daftar di sebelah kiri untuk mulai mengoreksi.</p>
                               </div>
                            )}
@@ -804,6 +811,51 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                  </div>
              )}
          </div>
+      )}
+
+      {/* Recap Table Modal */}
+      {showRecapModal && selectedExamIdForGrading && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-4 animate-fade-in">
+              <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full h-[80vh] flex flex-col">
+                  <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
+                      <div>
+                          <h3 className="font-bold text-lg text-gray-800">Tabel Rekap Nilai Akhir</h3>
+                          <p className="text-xs text-gray-500">{exams.find(e => e.id === selectedExamIdForGrading)?.courseName}</p>
+                      </div>
+                      <button onClick={() => setShowRecapModal(false)} className="text-gray-500 hover:text-gray-800 text-2xl font-bold">×</button>
+                  </div>
+                  <div className="flex-1 overflow-auto p-4">
+                      <table className="min-w-full divide-y divide-gray-200 border">
+                          <thead className="bg-gray-100">
+                              <tr>
+                                  <th className="px-4 py-2 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">No</th>
+                                  <th className="px-4 py-2 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">NIM</th>
+                                  <th className="px-4 py-2 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Nama</th>
+                                  <th className="px-4 py-2 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Nilai Akhir (0-100)</th>
+                              </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                              {getExamSubmissions(selectedExamIdForGrading).map((sub, idx) => (
+                                  <tr key={sub.id} className="hover:bg-gray-50">
+                                      <td className="px-4 py-2 text-sm text-gray-900">{idx + 1}</td>
+                                      <td className="px-4 py-2 text-sm text-gray-600">{sub.studentNim || '-'}</td>
+                                      <td className="px-4 py-2 text-sm text-gray-900 font-medium">{sub.studentName}</td>
+                                      <td className="px-4 py-2 text-sm text-green-700 font-bold">{getNormalizedScore(sub.totalScore, sub.examId)}</td>
+                                  </tr>
+                              ))}
+                              {getExamSubmissions(selectedExamIdForGrading).length === 0 && (
+                                  <tr>
+                                      <td colSpan={4} className="px-4 py-8 text-center text-gray-500 italic">Belum ada data nilai.</td>
+                                  </tr>
+                              )}
+                          </tbody>
+                      </table>
+                  </div>
+                  <div className="p-4 border-t bg-gray-50 rounded-b-xl text-right">
+                      <button onClick={() => setShowRecapModal(false)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 font-bold text-sm">Tutup</button>
+                  </div>
+              </div>
+          </div>
       )}
 
       {/* Live Monitor Modal */}
