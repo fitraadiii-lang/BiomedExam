@@ -8,7 +8,8 @@ import {
   setDoc, 
   query, 
   where,
-  deleteDoc
+  deleteDoc,
+  writeBatch
 } from 'firebase/firestore';
 
 const KEYS = {
@@ -61,7 +62,8 @@ const LS = {
   remove: <T extends { id: string }>(key: string, id: string) => {
     const data = LS.get<T>(key).filter(d => d.id !== id);
     LS.set(key, data);
-  }
+  },
+  clear: (key: string) => localStorage.removeItem(key)
 };
 
 // Unified error handler that triggers offline mode on permission issues
@@ -322,5 +324,73 @@ export const DB = {
        }
       return [];
     }
+  },
+
+  // === ADMIN MAINTENANCE TOOLS ===
+  adminCleanup: async (type: 'SESSIONS' | 'SUBMISSIONS' | 'INACTIVE_EXAMS'): Promise<number> => {
+      if (isOffline()) {
+          // Local Storage Cleanup
+          if (type === 'SESSIONS') {
+              LS.clear(KEYS.LS_SESSIONS);
+              return 1;
+          }
+          if (type === 'SUBMISSIONS') {
+              LS.clear(KEYS.LS_SUBMISSIONS);
+              return 1;
+          }
+          if (type === 'INACTIVE_EXAMS') {
+              const all = LS.get<Exam>(KEYS.LS_EXAMS);
+              const active = all.filter(e => e.isActive);
+              LS.set(KEYS.LS_EXAMS, active);
+              return all.length - active.length;
+          }
+          return 0;
+      }
+
+      // Firestore Cleanup
+      try {
+          let q;
+          let collectionName;
+
+          if (type === 'SESSIONS') {
+              collectionName = KEYS.SESSIONS;
+              q = query(collection(db, KEYS.SESSIONS)); // Delete ALL sessions
+          } else if (type === 'SUBMISSIONS') {
+              collectionName = KEYS.SUBMISSIONS;
+              q = query(collection(db, KEYS.SUBMISSIONS)); // Delete ALL submissions
+          } else if (type === 'INACTIVE_EXAMS') {
+              collectionName = KEYS.EXAMS;
+              q = query(collection(db, KEYS.EXAMS), where("isActive", "==", false));
+          } else {
+              return 0;
+          }
+
+          const snapshot = await getDocs(q);
+          const total = snapshot.size;
+          
+          if (total === 0) return 0;
+
+          // Delete in batches (Firestore limit is 500 per batch)
+          const batchSize = 500;
+          const chunks = [];
+          for (let i = 0; i < snapshot.docs.length; i += batchSize) {
+              chunks.push(snapshot.docs.slice(i, i + batchSize));
+          }
+
+          for (const chunk of chunks) {
+              const batch = writeBatch(db);
+              chunk.forEach(doc => {
+                  batch.delete(doc.ref);
+              });
+              await batch.commit();
+          }
+          
+          return total;
+
+      } catch (e) {
+          console.error("Cleanup Error", e);
+          handleDbError(e, "Admin Cleanup");
+          throw new Error("Gagal melakukan pembersihan data.");
+      }
   }
 };

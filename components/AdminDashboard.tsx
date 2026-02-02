@@ -16,6 +16,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onOpenLect
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
 
+  // Cleanup Modal State
+  const [showCleanupModal, setShowCleanupModal] = useState(false);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -52,6 +56,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onOpenLect
     setView('DETAIL');
   };
 
+  const handleCleanup = async (type: 'SESSIONS' | 'SUBMISSIONS' | 'INACTIVE_EXAMS', label: string) => {
+      const confirmMsg = type === 'SUBMISSIONS' 
+         ? "BAHAYA: Ini akan menghapus SEMUA nilai dan jawaban mahasiswa dari semua ujian. Pastikan Anda sudah mengunduh rekap nilai. Lanjutkan?"
+         : `Apakah Anda yakin ingin menghapus ${label}? Data tidak bisa dikembalikan.`;
+
+      if (!confirm(confirmMsg)) return;
+      if (type === 'SUBMISSIONS' && !confirm("Konfirmasi terakhir: Hapus semua data nilai?")) return;
+
+      setCleanupLoading(true);
+      try {
+          const count = await DB.adminCleanup(type);
+          alert(`Berhasil menghapus ${count} data.`);
+          loadData();
+      } catch (e: any) {
+          alert("Gagal: " + e.message);
+      } finally {
+          setCleanupLoading(false);
+      }
+  };
+
   if (view === 'DETAIL' && selectedExam) {
      return (
         <div className="max-w-7xl mx-auto px-4 py-8">
@@ -72,12 +96,77 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onOpenLect
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* Maintenance Modal */}
+      {showCleanupModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-4 animate-fade-in">
+              <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 relative">
+                  <button onClick={() => setShowCleanupModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-800 font-bold">✕</button>
+                  <h2 className="text-xl font-bold text-red-600 mb-2 flex items-center gap-2">
+                     <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                     Maintenance Database
+                  </h2>
+                  <p className="text-sm text-gray-600 mb-6">
+                      Gunakan fitur ini untuk membersihkan data lama agar Cloud Storage (Kuota Gratis) tidak penuh.
+                  </p>
+
+                  <div className="space-y-4">
+                      {/* Clean Sessions */}
+                      <div className="border p-4 rounded-lg bg-gray-50 flex justify-between items-center">
+                          <div>
+                              <div className="font-bold text-gray-800">1. Bersihkan Data Monitoring</div>
+                              <div className="text-xs text-gray-500">Hapus log "Live Monitor" & deteksi kecurangan lama.</div>
+                          </div>
+                          <button 
+                             disabled={cleanupLoading}
+                             onClick={() => handleCleanup('SESSIONS', 'Semua Sesi Monitoring')}
+                             className="bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-100 font-bold"
+                          >
+                             Bersihkan
+                          </button>
+                      </div>
+
+                      {/* Clean Inactive Exams */}
+                      <div className="border p-4 rounded-lg bg-gray-50 flex justify-between items-center">
+                          <div>
+                              <div className="font-bold text-gray-800">2. Hapus Ujian Non-Aktif</div>
+                              <div className="text-xs text-gray-500">Hapus permanen semua ujian yang statusnya "Hidden".</div>
+                          </div>
+                          <button 
+                             disabled={cleanupLoading}
+                             onClick={() => handleCleanup('INACTIVE_EXAMS', 'Semua Ujian Non-Aktif')}
+                             className="bg-white border border-orange-300 text-orange-700 px-3 py-1.5 rounded text-sm hover:bg-orange-50 font-bold"
+                          >
+                             Hapus
+                          </button>
+                      </div>
+
+                      {/* Clean Submissions (Danger) */}
+                      <div className="border border-red-200 p-4 rounded-lg bg-red-50 flex justify-between items-center">
+                          <div>
+                              <div className="font-bold text-red-800">3. Reset Total (Hapus Nilai)</div>
+                              <div className="text-xs text-red-600">Hapus SEMUA jawaban mahasiswa. Lakukan di akhir semester.</div>
+                          </div>
+                          <button 
+                             disabled={cleanupLoading}
+                             onClick={() => handleCleanup('SUBMISSIONS', 'Semua Data Nilai')}
+                             className="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 font-bold shadow"
+                          >
+                             RESET
+                          </button>
+                      </div>
+                  </div>
+                  
+                  {cleanupLoading && <div className="mt-4 text-center text-sm text-gray-500 animate-pulse">Sedang memproses penghapusan massal...</div>}
+              </div>
+          </div>
+      )}
+
       <div className="mb-8 bg-slate-900 text-white p-8 rounded-xl shadow-xl relative overflow-hidden">
         <div className="relative z-10">
           <h1 className="text-3xl font-bold mb-2">Panel Admin Prodi</h1>
           <p className="text-slate-400">Monitoring seluruh aktivitas ujian prodi Ilmu Biomedis.</p>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-8">
               <div className="bg-slate-800 p-4 rounded border border-slate-700">
                   <span className="block text-3xl font-bold text-green-400">{stats.activeExams}</span>
                   <span className="text-xs uppercase font-bold text-slate-400">Ujian Sedang Berjalan</span>
@@ -88,13 +177,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onOpenLect
               </div>
               <div className="bg-slate-800 p-4 rounded border border-slate-700 flex flex-col justify-center">
                   <button 
+                    onClick={() => setShowCleanupModal(true)}
+                    className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded transition-colors flex items-center justify-center gap-2 border border-slate-500"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    Maintenance
+                  </button>
+                  <span className="text-[10px] text-center text-slate-500 mt-2">Bersihkan cache & data lama</span>
+              </div>
+              <div className="bg-slate-800 p-4 rounded border border-slate-700 flex flex-col justify-center">
+                  <button 
                     onClick={onOpenLecturerView}
                     className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded transition-colors flex items-center justify-center gap-2"
                   >
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                    Kelola Ujian (View Dosen)
+                    View Dosen
                   </button>
-                  <span className="text-[10px] text-center text-slate-500 mt-2">Masuk ke mode dosen untuk membuat/edit ujian</span>
+                  <span className="text-[10px] text-center text-slate-500 mt-2">Buat & Edit Ujian</span>
               </div>
           </div>
         </div>
