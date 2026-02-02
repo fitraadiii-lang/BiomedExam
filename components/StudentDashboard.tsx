@@ -23,6 +23,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, onStar
     setIsRefreshing(true);
     try {
       const allExams = await DB.getExams();
+      // Filter: Hanya yang ACTIVE (Published) yang muncul di siswa
       setExams(allExams.filter(e => e.isActive));
 
       const mySubs = await DB.getSubmissionsByStudent(user.id);
@@ -170,9 +171,17 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, onStar
               <div className={`absolute top-0 right-0 px-3 py-1 text-xs font-bold text-white rounded-bl-lg ${getBadgeColor(exam.type)}`}>
                 {exam.type}
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-1">{exam.courseName}</h3>
-              <p className="text-sm text-gray-500 mb-4">{exam.title}</p>
               
+              {/* DISPLAY NAMA DOSEN AGAR SISWA TAHU */}
+              <h3 className="text-xl font-bold text-gray-900 mb-1">{exam.courseName}</h3>
+              <p className="text-sm text-gray-500 mb-2">{exam.title}</p>
+              
+              <div className="flex items-center gap-2 mb-4">
+                  <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-1 rounded border border-slate-200 font-medium">
+                     Dosen: {exam.lecturerName || 'Tim Dosen'}
+                  </span>
+              </div>
+
               <div className="text-sm mb-4 space-y-1">
                  <div>Mulai: {start.toLocaleString('id-ID', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</div>
                  <div>Selesai: {end.toLocaleString('id-ID', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}</div>

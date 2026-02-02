@@ -9,7 +9,6 @@ interface ExamRunnerProps {
 }
 
 const MAX_VIOLATIONS = 3;
-// UPDATE: Interval diubah ke 20 detik agar SANGAT HEMAT kuota Firebase Free Tier (20k writes/day)
 const HEARTBEAT_INTERVAL = 20000; 
 
 const shuffleArray = <T,>(array: T[]): T[] => {
@@ -31,8 +30,9 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
   const [isTerminated, setIsTerminated] = useState(false); 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   
-  // State untuk Fullscreen Trap
+  // State untuk Fullscreen Trap & Penalty
   const [isFullScreenBroken, setIsFullScreenBroken] = useState(false);
+  const [penaltySeconds, setPenaltySeconds] = useState(0); // Hitung mundur hukuman
 
   const [inputName, setInputName] = useState(user.name);
   const [inputNim, setInputNim] = useState('');
@@ -87,7 +87,7 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
     return () => clearTimeout(timer);
   }, [answers, inputName, inputNim, hasStarted, isLocked]);
 
-  // Timer
+  // Timer Ujian
   useEffect(() => {
     if (!hasStarted || isLocked || isTerminated) return;
     const interval = setInterval(() => {
@@ -114,7 +114,6 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
   }, [hasStarted, isLocked, isTerminated, violationCount, inputName]);
 
   const updateLiveSession = async () => {
-    // Only update to cloud, fire and forget
     DB.updateSession({
       examId: exam.id,
       studentId: user.id,
@@ -125,23 +124,48 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
     }).catch(e => console.error("Session update failed", e));
   };
 
-  // --- SECURITY ENHANCEMENT: FULLSCREEN TRAP & KEYBOARD LOCK ---
+  // --- LOGIC PENALTY TIMER ---
+  useEffect(() => {
+     let interval: any;
+     if (isFullScreenBroken && penaltySeconds > 0 && !isTerminated) {
+         interval = setInterval(() => {
+             setPenaltySeconds((prev) => prev - 1);
+         }, 1000);
+     } else if (isFullScreenBroken && penaltySeconds === 0 && !isTerminated) {
+         // Coba auto fullscreen saat waktu habis (Best Effort)
+         // Browser modern mungkin memblokir ini jika user tidak berinteraksi,
+         // tapi kita coba dulu.
+         document.documentElement.requestFullscreen().then(() => {
+             setIsFullScreenBroken(false);
+         }).catch(() => {
+             // Jika gagal (karena browser policy), biarkan tombol muncul
+             console.log("Auto fullscreen blocked by browser policy, waiting for click.");
+         });
+     }
+     return () => clearInterval(interval);
+  }, [isFullScreenBroken, penaltySeconds, isTerminated]);
+
+  // --- SECURITY ENHANCEMENT ---
   useEffect(() => {
     if (!hasStarted || isLocked || isTerminated) return;
 
     // 1. Fullscreen Change Listener
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement) {
-        // User exited fullscreen (pressed ESC or switched app)
-        setIsFullScreenBroken(true);
-        recordViolation("Keluar dari Mode Layar Penuh (ESC ditekan)");
+        // JIKA KELUAR FULLSCREEN
+        if (!isTerminated) {
+            setIsFullScreenBroken(true);
+            setPenaltySeconds(4); // SET PENALTI 4 DETIK
+            recordViolation("Keluar dari Mode Layar Penuh (ESC ditekan)");
+        }
       } else {
         setIsFullScreenBroken(false);
+        setPenaltySeconds(0);
       }
     };
 
     // 2. Visibility & Blur
-    const handleVisibilityChange = () => { if (document.hidden) recordViolation("Meninggalkan tab ujian/Membuka aplikasi lain."); };
+    const handleVisibilityChange = () => { if (document.hidden) recordViolation("Meninggalkan tab ujian."); };
     const handleBlur = () => recordViolation("Kehilangan fokus layar.");
     
     // 3. Prevent Context Menu
@@ -161,7 +185,7 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
     document.addEventListener('paste', handleCopyPaste);
     document.addEventListener('cut', handleCopyPaste);
     
-    // Try to lock keyboard (Chrome only feature)
+    // Try to lock keyboard
     if ('keyboard' in navigator && 'lock' in (navigator as any).keyboard) {
         (navigator as any).keyboard.lock(['Escape', 'Alt', 'Tab', 'Meta']).catch((e: any) => console.log("Keyboard lock failed", e));
     }
@@ -182,7 +206,8 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
     
     setViolationCount(prev => {
       const newCount = prev + 1;
-      // Force update immediately on violation
+      
+      // Update Database Realtime
       DB.updateSession({
         examId: exam.id,
         studentId: user.id,
@@ -194,14 +219,10 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
       
       if (newCount >= MAX_VIOLATIONS) {
         setIsTerminated(true);
-        terminateExam();
+        terminateExam(); // Trigger Diskualifikasi
         return newCount;
       }
       
-      // Jika violation karena fullscreen broken, jangan alert, karena akan ada overlay modal
-      if (!isFullScreenBroken) {
-         // alert(`PELANGGARAN (${newCount}/${MAX_VIOLATIONS}):\n${msg}`);
-      }
       return newCount;
     });
   };
@@ -211,11 +232,12 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
         await document.documentElement.requestFullscreen();
         setIsFullScreenBroken(false);
      } catch (e) {
-        alert("Gagal masuk fullscreen. Mohon gunakan browser Chrome/Edge terbaru.");
+        alert("Gagal masuk fullscreen. Mohon klik tombol di layar.");
      }
   };
 
   const terminateExam = async () => {
+    // Force submit dengan flag diskualifikasi
     await handleSubmit(true, true);
   };
 
@@ -280,14 +302,22 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
 
     try {
         await DB.saveSubmission(submission);
-        // Clean up Draft only on successful submission
         localStorage.removeItem(`EXAM_DRAFT_${exam.id}_${user.id}`);
         localStorage.removeItem(`EXAM_META_${exam.id}_${user.id}`);
-        alert(isViolationTermination ? "Sistem mendeteksi kecurangan berulang. Ujian dihentikan otomatis." : "Jawaban berhasil terkirim ke Cloud!");
+        
+        if (isViolationTermination) {
+            // Alert khusus jika didiskualifikasi
+            // tidak melakukan onFinish() agar layar tetap stuck di pesan diskualifikasi (opsional)
+            // tapi di sini kita panggil onFinish agar kembali ke menu utama
+            alert("MAAF, ANDA DIDISKUALIFIKASI.\nSistem mendeteksi 3x upaya kecurangan. Ujian Anda otomatis dikumpulkan dengan nilai 0.");
+        } else {
+            alert("Jawaban berhasil terkirim ke Cloud!");
+        }
     } catch (e) {
-        alert("Gagal menyimpan ke cloud. Jawaban akan disimpan lokal sebagai backup.");
-        console.error(e);
+        alert("Gagal menyimpan ke cloud. Jawaban tersimpan lokal.");
     }
+    
+    // Jika violation, user tetap dikeluarkan
     onFinish();
   };
 
@@ -299,7 +329,7 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
         <div className="bg-white max-w-lg w-full rounded p-8 animate-fade-in">
           <h2 className="text-2xl font-bold mb-4">Identitas Peserta</h2>
           <div className="bg-yellow-50 p-3 rounded text-xs text-yellow-800 mb-4 border border-yellow-200">
-             Mode Ujian Aman Aktif: Fullscreen Wajib. Jangan tinggalkan halaman ini.
+             Mode Ujian Aman Aktif: Fullscreen Wajib.
           </div>
           <input className="w-full border p-2 mb-2 rounded" value={inputName} onChange={e => setInputName(e.target.value)} placeholder="Nama Lengkap" />
           <input className="w-full border p-2 mb-4 rounded" value={inputNim} onChange={e => setInputNim(e.target.value)} placeholder="NIM" />
@@ -314,23 +344,50 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
   return (
     <div className="fixed inset-0 bg-white z-[9999] overflow-y-auto select-none" onContextMenu={(e) => e.preventDefault()}>
       
-      {/* FULLSCREEN TRAP OVERLAY */}
+      {/* FULLSCREEN TRAP & PENALTY OVERLAY */}
       {isFullScreenBroken && !isTerminated && !isLocked && (
           <div className="fixed inset-0 z-[100000] bg-white flex flex-col items-center justify-center p-10 text-center animate-fade-in">
               <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center mb-6 animate-pulse">
                   <svg className="w-12 h-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
               </div>
+              
               <h1 className="text-3xl font-bold text-red-600 mb-2">PELANGGARAN TERDETEKSI</h1>
-              <p className="text-xl text-gray-800 mb-8 max-w-md">
-                 Anda dilarang keluar dari mode Fullscreen. Sistem telah mencatat aktivitas ini sebagai kecurangan.
+              
+              <div className="bg-red-50 border border-red-200 p-4 rounded-xl mb-6 max-w-md mx-auto">
+                 <p className="font-bold text-red-800">PERINGATAN {violationCount} / {MAX_VIOLATIONS}</p>
+                 <p className="text-sm text-red-600">Jika mencapai 3x pelanggaran, Anda akan didiskualifikasi otomatis.</p>
+              </div>
+
+              {penaltySeconds > 0 ? (
+                  <div className="text-center">
+                      <p className="text-xl text-gray-800 mb-2">Layar Terkunci Sementara</p>
+                      <div className="text-6xl font-black text-slate-900 mb-4">{penaltySeconds}</div>
+                      <p className="text-sm text-gray-500 animate-pulse">Harap tunggu...</p>
+                  </div>
+              ) : (
+                  <div>
+                      <p className="text-xl text-gray-800 mb-6">Silakan kembali mengerjakan.</p>
+                      <button 
+                          onClick={reEnterFullscreen}
+                          className="bg-green-600 text-white px-8 py-4 rounded-xl font-bold text-lg shadow-xl hover:bg-green-700 transition-transform transform hover:scale-105"
+                      >
+                          LANJUTKAN UJIAN
+                      </button>
+                  </div>
+              )}
+          </div>
+      )}
+
+      {/* TAMPILAN DISKUALIFIKASI (JIKA PERLU OVERLAY) */}
+      {isTerminated && (
+          <div className="fixed inset-0 z-[100001] bg-red-900 text-white flex flex-col items-center justify-center p-10 text-center">
+              <h1 className="text-5xl font-black mb-4">DISKUALIFIKASI</h1>
+              <p className="text-xl max-w-lg mx-auto">
+                  Sistem mendeteksi aktivitas mencurigakan berulang kali. Ujian Anda telah dihentikan paksa dan nilai dinolkan.
               </p>
-              <button 
-                  onClick={reEnterFullscreen}
-                  className="bg-red-600 text-white px-8 py-4 rounded-xl font-bold text-lg shadow-xl hover:bg-red-700 transition-transform transform hover:scale-105"
-              >
-                  KEMBALI KE UJIAN SEKARANG
+              <button onClick={() => onFinish()} className="mt-8 bg-white text-red-900 px-6 py-3 rounded font-bold">
+                  KEMBALI KE MENU UTAMA
               </button>
-              <p className="mt-4 text-sm text-gray-500">Klik tombol di atas untuk melanjutkan pengerjaan.</p>
           </div>
       )}
 
@@ -340,9 +397,6 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
            <div className="text-xs text-slate-300">{inputName} ({inputNim})</div>
         </div>
         <div className="flex items-center gap-4">
-            <div className="text-xs text-green-400 bg-slate-800 px-2 py-1 rounded">
-               ● Auto-Save Aktif
-            </div>
             <div className={`text-xl font-mono font-bold ${timeLeft < 300 ? 'text-red-500 animate-pulse' : 'text-green-400'}`}>
                {formatTime(timeLeft)}
             </div>
