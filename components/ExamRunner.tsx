@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Exam, QuestionType, Answer, GradedAnswer, Submission, Question } from '../types';
 import { DB } from '../services/db';
 
@@ -9,9 +9,8 @@ interface ExamRunnerProps {
 }
 
 const MAX_VIOLATIONS = 3;
-// UPDATE: Interval diubah ke 10 detik agar hemat kuota Firebase Free Tier (20k writes/day)
-// 25 mhs * 60 menit / 10 detik = 9.000 writes (Aman)
-const HEARTBEAT_INTERVAL = 10000; 
+// UPDATE: Interval diubah ke 20 detik agar SANGAT HEMAT kuota Firebase Free Tier (20k writes/day)
+const HEARTBEAT_INTERVAL = 20000; 
 
 const shuffleArray = <T,>(array: T[]): T[] => {
     const arr = [...array];
@@ -32,6 +31,9 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
   const [isTerminated, setIsTerminated] = useState(false); 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   
+  // State untuk Fullscreen Trap
+  const [isFullScreenBroken, setIsFullScreenBroken] = useState(false);
+
   const [inputName, setInputName] = useState(user.name);
   const [inputNim, setInputNim] = useState('');
   
@@ -123,27 +125,61 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
     }).catch(e => console.error("Session update failed", e));
   };
 
-  // Security: Visibility & Context Menu
+  // --- SECURITY ENHANCEMENT: FULLSCREEN TRAP & KEYBOARD LOCK ---
   useEffect(() => {
     if (!hasStarted || isLocked || isTerminated) return;
-    const handleVisibilityChange = () => { if (document.hidden) recordViolation("Meninggalkan tab ujian."); };
+
+    // 1. Fullscreen Change Listener
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        // User exited fullscreen (pressed ESC or switched app)
+        setIsFullScreenBroken(true);
+        recordViolation("Keluar dari Mode Layar Penuh (ESC ditekan)");
+      } else {
+        setIsFullScreenBroken(false);
+      }
+    };
+
+    // 2. Visibility & Blur
+    const handleVisibilityChange = () => { if (document.hidden) recordViolation("Meninggalkan tab ujian/Membuka aplikasi lain."); };
     const handleBlur = () => recordViolation("Kehilangan fokus layar.");
-    // Prevent Right Click
+    
+    // 3. Prevent Context Menu
     const handleContextMenu = (e: Event) => e.preventDefault();
     
+    // 4. Prevent Copy Paste
+    const handleCopyPaste = (e: Event) => {
+        e.preventDefault();
+        alert("Copy/Paste dinonaktifkan!");
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleBlur);
     document.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('copy', handleCopyPaste);
+    document.addEventListener('paste', handleCopyPaste);
+    document.addEventListener('cut', handleCopyPaste);
+    
+    // Try to lock keyboard (Chrome only feature)
+    if ('keyboard' in navigator && 'lock' in (navigator as any).keyboard) {
+        (navigator as any).keyboard.lock(['Escape', 'Alt', 'Tab', 'Meta']).catch((e: any) => console.log("Keyboard lock failed", e));
+    }
     
     return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
       document.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('copy', handleCopyPaste);
+      document.removeEventListener('paste', handleCopyPaste);
+      document.removeEventListener('cut', handleCopyPaste);
     };
   }, [hasStarted, isLocked, isTerminated]);
 
   const recordViolation = (msg: string) => {
     if (isTerminated || isLocked) return;
+    
     setViolationCount(prev => {
       const newCount = prev + 1;
       // Force update immediately on violation
@@ -155,14 +191,28 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
         lastHeartbeat: new Date().toISOString(),
         violationCount: newCount
       });
+      
       if (newCount >= MAX_VIOLATIONS) {
         setIsTerminated(true);
         terminateExam();
         return newCount;
       }
-      alert(`PELANGGARAN (${newCount}/${MAX_VIOLATIONS}):\n${msg}`);
+      
+      // Jika violation karena fullscreen broken, jangan alert, karena akan ada overlay modal
+      if (!isFullScreenBroken) {
+         // alert(`PELANGGARAN (${newCount}/${MAX_VIOLATIONS}):\n${msg}`);
+      }
       return newCount;
     });
+  };
+
+  const reEnterFullscreen = async () => {
+     try {
+        await document.documentElement.requestFullscreen();
+        setIsFullScreenBroken(false);
+     } catch (e) {
+        alert("Gagal masuk fullscreen. Mohon gunakan browser Chrome/Edge terbaru.");
+     }
   };
 
   const terminateExam = async () => {
@@ -196,7 +246,12 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
   const handleSubmit = async (autoSubmit = false, isViolationTermination = false) => {
     if (isLocked && !isViolationTermination) return;
     setIsLocked(true);
+    
+    // Unlock everything
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    if ('keyboard' in navigator && 'unlock' in (navigator as any).keyboard) {
+        (navigator as any).keyboard.unlock();
+    }
 
     // Grading Logic
     let totalScore = 0;
@@ -228,7 +283,7 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
         // Clean up Draft only on successful submission
         localStorage.removeItem(`EXAM_DRAFT_${exam.id}_${user.id}`);
         localStorage.removeItem(`EXAM_META_${exam.id}_${user.id}`);
-        alert(isViolationTermination ? "Diskualifikasi. Jawaban dikirim." : "Jawaban berhasil terkirim ke Cloud!");
+        alert(isViolationTermination ? "Sistem mendeteksi kecurangan berulang. Ujian dihentikan otomatis." : "Jawaban berhasil terkirim ke Cloud!");
     } catch (e) {
         alert("Gagal menyimpan ke cloud. Jawaban akan disimpan lokal sebagai backup.");
         console.error(e);
@@ -244,7 +299,7 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
         <div className="bg-white max-w-lg w-full rounded p-8 animate-fade-in">
           <h2 className="text-2xl font-bold mb-4">Identitas Peserta</h2>
           <div className="bg-yellow-50 p-3 rounded text-xs text-yellow-800 mb-4 border border-yellow-200">
-             Mode Ujian Aman Aktif: Copy-Paste dinonaktifkan. Jangan tinggalkan halaman ini.
+             Mode Ujian Aman Aktif: Fullscreen Wajib. Jangan tinggalkan halaman ini.
           </div>
           <input className="w-full border p-2 mb-2 rounded" value={inputName} onChange={e => setInputName(e.target.value)} placeholder="Nama Lengkap" />
           <input className="w-full border p-2 mb-4 rounded" value={inputNim} onChange={e => setInputNim(e.target.value)} placeholder="NIM" />
@@ -258,6 +313,27 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
 
   return (
     <div className="fixed inset-0 bg-white z-[9999] overflow-y-auto select-none" onContextMenu={(e) => e.preventDefault()}>
+      
+      {/* FULLSCREEN TRAP OVERLAY */}
+      {isFullScreenBroken && !isTerminated && !isLocked && (
+          <div className="fixed inset-0 z-[100000] bg-white flex flex-col items-center justify-center p-10 text-center animate-fade-in">
+              <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center mb-6 animate-pulse">
+                  <svg className="w-12 h-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+              </div>
+              <h1 className="text-3xl font-bold text-red-600 mb-2">PELANGGARAN TERDETEKSI</h1>
+              <p className="text-xl text-gray-800 mb-8 max-w-md">
+                 Anda dilarang keluar dari mode Fullscreen. Sistem telah mencatat aktivitas ini sebagai kecurangan.
+              </p>
+              <button 
+                  onClick={reEnterFullscreen}
+                  className="bg-red-600 text-white px-8 py-4 rounded-xl font-bold text-lg shadow-xl hover:bg-red-700 transition-transform transform hover:scale-105"
+              >
+                  KEMBALI KE UJIAN SEKARANG
+              </button>
+              <p className="mt-4 text-sm text-gray-500">Klik tombol di atas untuk melanjutkan pengerjaan.</p>
+          </div>
+      )}
+
       <div className="sticky top-0 bg-slate-900 text-white p-4 flex justify-between items-center shadow-lg z-10">
         <div>
            <div className="font-bold">{exam.courseName}</div>
