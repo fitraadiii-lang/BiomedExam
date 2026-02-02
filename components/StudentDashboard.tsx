@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Exam } from '../types';
+import { User, Exam, ExamType } from '../types';
 import { DB } from '../services/db';
 
 interface StudentDashboardProps {
@@ -84,12 +84,21 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, onStar
     }
   };
 
+  const getBadgeColor = (type: ExamType) => {
+    switch(type) {
+       case ExamType.UTS: return 'bg-blue-500';
+       case ExamType.UAS: return 'bg-purple-500';
+       case ExamType.QUIZ: return 'bg-orange-500';
+       default: return 'bg-gray-500';
+    }
+ };
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       <div className="mb-8 flex justify-between items-end">
         <div>
            <h1 className="text-3xl font-bold text-gray-900">Portal Ujian Mahasiswa</h1>
-           <p className="text-gray-600">Semangat mengerjakan UTS dan UAS!</p>
+           <p className="text-gray-600">Semangat mengerjakan UTS, UAS dan Kuis!</p>
         </div>
         <button onClick={refreshExams} className="text-sm text-green-600 hover:text-green-800 flex items-center gap-1 font-bold">
            <svg className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
@@ -158,7 +167,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ user, onStar
 
           return (
             <div key={exam.id} className="bg-white rounded-xl shadow-sm border p-6 flex flex-col relative overflow-hidden">
-              <div className={`absolute top-0 right-0 px-3 py-1 text-xs font-bold text-white rounded-bl-lg ${exam.type === 'UTS' ? 'bg-blue-500' : 'bg-purple-500'}`}>
+              <div className={`absolute top-0 right-0 px-3 py-1 text-xs font-bold text-white rounded-bl-lg ${getBadgeColor(exam.type)}`}>
                 {exam.type}
               </div>
               <h3 className="text-xl font-bold text-gray-900 mb-1">{exam.courseName}</h3>

@@ -15,6 +15,7 @@ export interface User {
 export enum ExamType {
   UTS = 'UTS',
   UAS = 'UAS',
+  QUIZ = 'QUIZ',
 }
 
 export enum QuestionType {

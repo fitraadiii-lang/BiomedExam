@@ -1,5 +1,5 @@
 {
   "name": "BioMed Exam Portal - Universitas Karya Husada Semarang",
-  "description": "A comprehensive examination platform for the Biomedical Science program, featuring specific portals for Students and Lecturers, supporting UTS/UAS, and AI-assisted grading.",
+  "description": "Platform ujian online Program Studi Ilmu Biomedis Universitas Karya Husada Semarang, mendukung UTS/UAS dan penilaian berbasis AI.",
   "requestFramePermissions": []
 }

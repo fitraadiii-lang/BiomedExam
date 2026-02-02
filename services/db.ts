@@ -32,7 +32,9 @@ let forceOffline = false;
 
 export const setForceOffline = (enabled: boolean) => {
   forceOffline = enabled;
-  console.log(`Offline Mode forced: ${enabled}`);
+  if (enabled) {
+      console.warn("⚠️ APP SWITCHED TO OFFLINE MODE");
+  }
 };
 
 // Helper to check effective mode
@@ -62,16 +64,22 @@ const LS = {
   }
 };
 
-// Helper untuk menangani error Firebase dengan pesan yang jelas
-const handleFirebaseError = (e: any) => {
-  console.error("Firebase Error Full:", e);
-  if (e.code === 'permission-denied') {
-    throw new Error("AKSES DITOLAK: Database dikunci. Buka Firebase Console > Firestore Database > Rules tab > Ubah menjadi 'allow read, write: if true;'");
+// Unified error handler that triggers offline mode on permission issues
+const handleDbError = (e: any, context: string) => {
+  const msg = e.message || '';
+  const code = e.code || '';
+  
+  // Detect permission denied or general unavailability
+  if (code === 'permission-denied' || code === 'unavailable' || msg.includes('Missing or insufficient permissions')) {
+    if (!forceOffline) {
+        console.warn(`[Auto-Recovery] Switching to Offline Mode due to Firestore error in ${context}: ${code}`);
+        setForceOffline(true);
+    }
+    return true; // signal that we switched to offline/should use fallback
   }
-  if (e.code === 'failed-precondition' || e.code === 'unavailable') {
-    throw new Error("DATABASE BELUM SIAP: Pastikan Anda sudah klik 'Create Database' di menu Firestore Database pada Firebase Console.");
-  }
-  throw e;
+  
+  console.error(`${context} Error:`, e);
+  return false;
 };
 
 // --- HYBRID DATABASE SERVICE ---
@@ -94,6 +102,7 @@ export const DB = {
 
   // === AUTH & USERS ===
   login: async (email: string): Promise<User | undefined> => {
+    // Attempt local first if forced
     if (isOffline()) {
        return LS.find<User>(KEYS.LS_USERS, u => u.email === email);
     }
@@ -102,15 +111,16 @@ export const DB = {
       const querySnapshot = await getDocs(q);
       if (querySnapshot.empty) return undefined;
       return querySnapshot.docs[0].data() as User;
-    } catch (e) {
-      // Jika error auth/config, biarkan UI handle untuk switch offline
-      handleFirebaseError(e);
+    } catch (e: any) {
+      if (handleDbError(e, "Login")) {
+         // Retry locally
+         return LS.find<User>(KEYS.LS_USERS, u => u.email === email);
+      }
       return undefined;
     }
   },
 
   register: async (user: User): Promise<User> => {
-    // Check duplication
     const existing = await DB.login(user.email);
     if (existing) throw new Error('User already exists');
 
@@ -123,7 +133,10 @@ export const DB = {
       await setDoc(doc(db, KEYS.USERS, user.id), sanitize(user));
       return user;
     } catch (e) {
-      handleFirebaseError(e);
+      if (handleDbError(e, "Register")) {
+        LS.add(KEYS.LS_USERS, user);
+        return user;
+      }
       throw e;
     }
   },
@@ -137,7 +150,9 @@ export const DB = {
       const querySnapshot = await getDocs(q);
       return querySnapshot.docs.map(d => d.data() as User);
     } catch (e) {
-      console.error("Get Students Error", e);
+      if (handleDbError(e, "Get Students")) {
+         return LS.filter<User>(KEYS.LS_USERS, u => u.role === UserRole.STUDENT);
+      }
       return [];
     }
   },
@@ -151,7 +166,10 @@ export const DB = {
     try {
       await setDoc(doc(db, KEYS.EXAMS, exam.id), sanitize(exam));
     } catch (e) {
-      handleFirebaseError(e);
+      if (handleDbError(e, "Save Exam")) {
+        LS.add(KEYS.LS_EXAMS, exam);
+        return;
+      }
     }
   },
 
@@ -163,8 +181,9 @@ export const DB = {
       const querySnapshot = await getDocs(collection(db, KEYS.EXAMS));
       return querySnapshot.docs.map(d => d.data() as Exam);
     } catch (e) {
-      console.error("Get Exams Error (Initial Load)", e);
-      // Jangan throw di sini agar halaman tidak crash total saat load awal
+      if (handleDbError(e, "Get Exams")) {
+         return LS.get<Exam>(KEYS.LS_EXAMS);
+      }
       return []; 
     }
   },
@@ -178,7 +197,9 @@ export const DB = {
       const docSnap = await getDoc(docRef);
       return docSnap.exists() ? (docSnap.data() as Exam) : undefined;
     } catch (e) {
-      handleFirebaseError(e);
+       if (handleDbError(e, "Get Exam By ID")) {
+         return LS.find<Exam>(KEYS.LS_EXAMS, ex => ex.id === id);
+       }
       return undefined;
     }
   },
@@ -191,7 +212,10 @@ export const DB = {
     try {
       await deleteDoc(doc(db, KEYS.EXAMS, id));
     } catch (e) {
-      handleFirebaseError(e);
+       if (handleDbError(e, "Delete Exam")) {
+          LS.remove(KEYS.LS_EXAMS, id);
+          return;
+       }
     }
   },
 
@@ -204,7 +228,10 @@ export const DB = {
     try {
       await setDoc(doc(db, KEYS.SUBMISSIONS, submission.id), sanitize(submission));
     } catch (e) {
-      handleFirebaseError(e);
+       if (handleDbError(e, "Save Submission")) {
+          LS.add(KEYS.LS_SUBMISSIONS, submission);
+          return;
+       }
     }
   },
 
@@ -216,7 +243,9 @@ export const DB = {
       const querySnapshot = await getDocs(collection(db, KEYS.SUBMISSIONS));
       return querySnapshot.docs.map(d => d.data() as Submission);
     } catch (e) {
-       console.error("Get Subs Error", e);
+       if (handleDbError(e, "Get Submissions")) {
+          return LS.get<Submission>(KEYS.LS_SUBMISSIONS);
+       }
        return [];
     }
   },
@@ -230,7 +259,9 @@ export const DB = {
       const querySnapshot = await getDocs(q);
       return querySnapshot.docs.map(d => d.data() as Submission);
     } catch (e) {
-      console.error("Get Subs by Exam Error", e);
+       if (handleDbError(e, "Get Submissions By Exam")) {
+          return LS.filter<Submission>(KEYS.LS_SUBMISSIONS, s => s.examId === examId);
+       }
       return [];
     }
   },
@@ -244,7 +275,9 @@ export const DB = {
       const querySnapshot = await getDocs(q);
       return querySnapshot.docs.map(d => d.data() as Submission);
     } catch (e) {
-      console.error("Get Subs by Student Error", e);
+       if (handleDbError(e, "Get Submissions By Student")) {
+          return LS.filter<Submission>(KEYS.LS_SUBMISSIONS, s => s.studentId === studentId);
+       }
       return [];
     }
   },
@@ -253,7 +286,6 @@ export const DB = {
   updateSession: async (session: ExamSession) => {
     const sessionId = `${session.examId}_${session.studentId}`;
     if (isOffline()) {
-      // Mock session update in LS
       const sessions = LS.get<ExamSession>(KEYS.LS_SESSIONS);
       const idx = sessions.findIndex(s => `${s.examId}_${s.studentId}` === sessionId);
       if (idx >= 0) sessions[idx] = session;
@@ -261,8 +293,19 @@ export const DB = {
       LS.set(KEYS.LS_SESSIONS, sessions);
       return;
     }
-    // Fire and forget, but catch errors to avoid crashing exam
-    setDoc(doc(db, KEYS.SESSIONS, sessionId), sanitize(session)).catch(e => console.error("Session update error (non-fatal)", e));
+    
+    try {
+        await setDoc(doc(db, KEYS.SESSIONS, sessionId), sanitize(session));
+    } catch (e) {
+         // Non-fatal, silent fail or switch
+         handleDbError(e, "Update Session");
+         // Always fallback to LS for session to ensure continuity locally
+         const sessions = LS.get<ExamSession>(KEYS.LS_SESSIONS);
+         const idx = sessions.findIndex(s => `${s.examId}_${s.studentId}` === sessionId);
+         if (idx >= 0) sessions[idx] = session;
+         else sessions.push(session);
+         LS.set(KEYS.LS_SESSIONS, sessions);
+    }
   },
 
   getSessionsByExam: async (examId: string): Promise<ExamSession[]> => {
@@ -274,7 +317,9 @@ export const DB = {
       const querySnapshot = await getDocs(q);
       return querySnapshot.docs.map(d => d.data() as ExamSession);
     } catch (e) {
-      console.error("Get Sessions Error", e);
+       if (handleDbError(e, "Get Sessions")) {
+          return LS.filter<ExamSession>(KEYS.LS_SESSIONS, s => s.examId === examId);
+       }
       return [];
     }
   }

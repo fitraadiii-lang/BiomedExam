@@ -28,6 +28,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
   const [questions, setQuestions] = useState<Question[]>([]);
   
   // Question Form State (Manual Input)
+  const [editingQuestionIndex, setEditingQuestionIndex] = useState<number | null>(null);
   const [qText, setQText] = useState('');
   const [qType, setQType] = useState<QuestionType>(QuestionType.MULTIPLE_CHOICE);
   const [qPoints, setQPoints] = useState(10);
@@ -106,11 +107,20 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
     return result;
   };
 
+  const clearQuestionForm = () => {
+    setEditingQuestionIndex(null);
+    setQText('');
+    setQRefAnswer('');
+    setQOptions(['', '', '', '']);
+    setQCorrect(0);
+    setQPoints(10);
+  };
+
   const addQuestion = () => {
     if (!qText.trim()) return;
 
     const newQ: Question = {
-      id: Date.now().toString(),
+      id: editingQuestionIndex !== null ? questions[editingQuestionIndex].id : Date.now().toString(),
       text: qText,
       type: qType,
       points: qPoints,
@@ -123,20 +133,26 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
       newQ.referenceAnswer = qRefAnswer;
     }
 
-    setQuestions([...questions, newQ]);
+    if (editingQuestionIndex !== null) {
+        // Update Mode
+        const updatedQuestions = [...questions];
+        updatedQuestions[editingQuestionIndex] = newQ;
+        setQuestions(updatedQuestions);
+        setEditingQuestionIndex(null);
+    } else {
+        // Add Mode
+        setQuestions([...questions, newQ]);
+    }
     
     // Reset Form
-    setQText('');
-    setQRefAnswer('');
-    setQOptions(['', '', '', '']);
-    setQCorrect(0);
-    // alert("Soal ditambahkan ke Draft!"); // Optional feedback
+    clearQuestionForm();
   };
 
   const deleteQuestion = (idx: number) => {
     const newQ = [...questions];
     newQ.splice(idx, 1);
     setQuestions(newQ);
+    if (editingQuestionIndex === idx) clearQuestionForm();
   };
 
   const editQuestionInDraft = (idx: number) => {
@@ -152,11 +168,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
         setQRefAnswer(q.referenceAnswer || '');
     }
 
-    // Remove the question from the array so the user can "update" it by re-adding
-    // This is a simple UX pattern for this case
-    const newQ = [...questions];
-    newQ.splice(idx, 1);
-    setQuestions(newQ);
+    setEditingQuestionIndex(idx);
   };
 
   const handleEditExam = (exam: Exam) => {
@@ -190,6 +202,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
      setEndTime('');
      setQuestions([]);
      setAccessCode('');
+     clearQuestionForm();
   };
 
   const handleCreateOrUpdateExam = async () => {
@@ -251,25 +264,56 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
   }
 
   // Helper to apply template
-  const applyTemplate = (templateType: 'UTS' | 'UAS') => {
-      setType(templateType === 'UTS' ? ExamType.UTS : ExamType.UAS);
-      setTitle(templateType === 'UTS' ? 'Ujian Tengah Semester Ganjil 2024/2025' : 'Ujian Akhir Semester Ganjil 2024/2025');
-      setDescription(templateType === 'UTS' 
-        ? 'Waktu pengerjaan 90 menit. Sifat ujian: Tutup Buku. Dilarang bekerjasama.' 
-        : 'Waktu pengerjaan 100 menit. Mencakup seluruh materi semester ini.');
+  const applyTemplate = (templateType: 'UTS' | 'UAS' | 'QUIZ') => {
+      setType(templateType === 'UTS' ? ExamType.UTS : templateType === 'UAS' ? ExamType.UAS : ExamType.QUIZ);
       
-      // Set default time to tomorrow 08:00 - 10:00
+      if (templateType === 'QUIZ') {
+        setTitle('Kuis Harian / Pre-Test');
+        setDescription('Waktu pengerjaan 30 menit. Kerjakan dengan jujur.');
+      } else {
+        setTitle(templateType === 'UTS' ? 'Ujian Tengah Semester Ganjil 2024/2025' : 'Ujian Akhir Semester Ganjil 2024/2025');
+        setDescription(templateType === 'UTS' 
+          ? 'Waktu pengerjaan 90 menit. Sifat ujian: Tutup Buku. Dilarang bekerjasama.' 
+          : 'Waktu pengerjaan 100 menit. Mencakup seluruh materi semester ini.');
+      }
+      
+      // Set default time to tomorrow 08:00
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       tomorrow.setHours(8, 0, 0, 0);
+      
       const tomorrowEnd = new Date(tomorrow);
-      tomorrowEnd.setHours(10, 0, 0, 0);
+      // If quiz, default 30 mins, else 2 hours
+      if (templateType === 'QUIZ') {
+         tomorrowEnd.setMinutes(30);
+      } else {
+         tomorrowEnd.setHours(10, 0, 0, 0);
+      }
       
       const pad = (n: number) => n < 10 ? '0'+n : n;
       const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
       setStartTime(fmt(tomorrow));
       setEndTime(fmt(tomorrowEnd));
+  };
+
+  // Helper for badges color
+  const getBadgeColor = (type: ExamType) => {
+     switch(type) {
+        case ExamType.UTS: return 'bg-blue-500';
+        case ExamType.UAS: return 'bg-purple-500';
+        case ExamType.QUIZ: return 'bg-orange-500';
+        default: return 'bg-gray-500';
+     }
+  }
+
+  // Helper untuk menghitung nilai skala 100
+  const getNormalizedScore = (rawScore: number, examId: string) => {
+    const exam = exams.find(e => e.id === examId);
+    if (!exam) return "0.0";
+    const maxPoints = exam.questions.reduce((sum, q) => sum + q.points, 0) || 1;
+    // Rumus: (Skor Mahasiswa / Total Max Poin) * 100
+    return ((rawScore / maxPoints) * 100).toFixed(1);
   };
 
   // AI Grading Logic
@@ -326,44 +370,93 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
       return;
     }
 
-    // HTML Table method for robust Excel compatibility
-    let tableContent = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta http-equiv="content-type" content="text/plain; charset=UTF-8"/>
-      </head>
-      <body>
-        <table>
-          <thead>
-            <tr>
-              <th style="background-color:#eee;font-weight:bold;">NIM</th>
-              <th style="background-color:#eee;font-weight:bold;">Nama Mahasiswa</th>
-              <th style="background-color:#eee;font-weight:bold;">Waktu Submit</th>
-              <th style="background-color:#eee;font-weight:bold;">Status Koreksi</th>
-              <th style="background-color:#eee;font-weight:bold;">Pelanggaran</th>
-              <th style="background-color:#eee;font-weight:bold;">Total Nilai</th>
-            </tr>
-          </thead>
-          <tbody>
-    `;
+    // 1. Calculate Total Possible Score for the Exam
+    // Ini digunakan untuk normalisasi nilai ke range 0-100
+    const maxExamPoints = exam?.questions.reduce((sum, q) => sum + q.points, 0) || 1; // Avoid divide by zero
 
-    examSubs.forEach(sub => {
-      const status = sub.isGraded ? "Sudah Dinilai" : "Belum/Sedang Dinilai";
-      tableContent += `
-        <tr>
-          <td style="mso-number-format:'@'">${sub.studentNim || '-'}</td>
-          <td>${sub.studentName}</td>
-          <td>${new Date(sub.submittedAt).toLocaleString('id-ID')}</td>
-          <td>${status}</td>
-          <td>${sub.violationCount || 0}</td>
-          <td x:num>${sub.totalScore}</td>
-        </tr>
-      `;
+    // 2. Generate XML Spreadsheet (Excel 2003 format) which supports multiple sheets
+    // Header XML
+    let xmlContent = `<?xml version="1.0"?>
+    <?mso-application progid="Excel.Sheet"?>
+    <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+      xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:x="urn:schemas-microsoft-com:office:excel"
+      xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+      xmlns:html="http://www.w3.org/TR/REC-html40">
+      <Styles>
+        <Style ss:ID="sHeader">
+          <Font ss:Bold="1"/>
+          <Interior ss:Color="#EFEFEF" ss:Pattern="Solid"/>
+          <Borders>
+             <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1"/>
+          </Borders>
+        </Style>
+        <Style ss:ID="sData">
+           <Borders>
+             <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1"/>
+          </Borders>
+        </Style>
+      </Styles>`;
+
+    // --- SHEET 1: REKAP NILAI (No, NIM, Nama, Nilai 0-100) ---
+    // SESUAI PERMINTAAN: HANYA KOLOM PENTING
+    xmlContent += `<Worksheet ss:Name="REKAP NILAI (0-100)"><Table>`;
+    
+    // Header Row
+    xmlContent += `<Row>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">No</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">NIM</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">NAMA</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">NILAI AKHIR</Data></Cell>
+    </Row>`;
+
+    // Data Rows
+    examSubs.forEach((sub, index) => {
+        // Rumus Konversi: (Skor Mahasiswa / Total Poin Ujian) * 100
+        const finalScore = ((sub.totalScore / maxExamPoints) * 100);
+        
+        xmlContent += `<Row>
+          <Cell ss:StyleID="sData"><Data ss:Type="Number">${index + 1}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="String">${sub.studentNim || '-'}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="String">${sub.studentName}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="Number">${finalScore.toFixed(2)}</Data></Cell>
+        </Row>`;
     });
 
-    tableContent += `</tbody></table></body></html>`;
+    xmlContent += `</Table></Worksheet>`;
 
-    const blob = new Blob([tableContent], { type: 'application/vnd.ms-excel' });
+    // --- SHEET 2: DETAIL LENGKAP (Backup) ---
+    xmlContent += `<Worksheet ss:Name="DETAIL & LOG"><Table>`;
+    xmlContent += `<Row>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">No</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">NIM</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Nama</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Waktu Submit</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Status Koreksi</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Pelanggaran</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Poin Mentah (Max ${maxExamPoints})</Data></Cell>
+      <Cell ss:StyleID="sHeader"><Data ss:Type="String">Nilai Akhir (1-100)</Data></Cell>
+    </Row>`;
+
+    examSubs.forEach((sub, index) => {
+        const finalScore = ((sub.totalScore / maxExamPoints) * 100);
+        const status = sub.isGraded ? "Sudah Dinilai" : "Belum/Sedang Dinilai";
+
+        xmlContent += `<Row>
+          <Cell ss:StyleID="sData"><Data ss:Type="Number">${index + 1}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="String">${sub.studentNim || '-'}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="String">${sub.studentName}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="String">${new Date(sub.submittedAt).toLocaleString('id-ID')}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="String">${status}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="Number">${sub.violationCount || 0}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="Number">${sub.totalScore}</Data></Cell>
+          <Cell ss:StyleID="sData"><Data ss:Type="Number">${finalScore.toFixed(2)}</Data></Cell>
+        </Row>`;
+    });
+
+    xmlContent += `</Table></Worksheet></Workbook>`;
+
+    const blob = new Blob([xmlContent], { type: 'application/vnd.ms-excel' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -456,7 +549,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                  <tr key={exam.id}>
                    <td className="px-6 py-4">
                      <div className="flex items-center gap-2">
-                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold text-white ${exam.type === ExamType.UTS ? 'bg-blue-500' : 'bg-purple-500'}`}>{exam.type}</span>
+                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold text-white ${getBadgeColor(exam.type)}`}>{exam.type}</span>
                        <div className="font-bold">{exam.courseName}</div>
                      </div>
                      <div className="text-sm text-gray-500">{exam.title}</div>
@@ -493,6 +586,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                     <div className="bg-green-50 p-4 rounded-xl border border-green-200">
                     <p className="text-sm font-bold text-green-800 mb-2">Jalan Pintas (Template)</p>
                     <div className="flex gap-2">
+                        <button onClick={() => applyTemplate('QUIZ')} className="flex-1 bg-orange-500 text-white text-sm py-2 rounded font-medium hover:bg-orange-600">Set Quiz</button>
                         <button onClick={() => applyTemplate('UTS')} className="flex-1 bg-blue-600 text-white text-sm py-2 rounded font-medium hover:bg-blue-700">Set UTS</button>
                         <button onClick={() => applyTemplate('UAS')} className="flex-1 bg-purple-600 text-white text-sm py-2 rounded font-medium hover:bg-purple-700">Set UAS</button>
                     </div>
@@ -512,6 +606,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                     <div className="mb-2">
                         <label className="text-xs text-gray-500 block">Tipe Ujian</label>
                         <select className="w-full p-2 border rounded" value={type} onChange={e => setType(e.target.value as ExamType)}>
+                            <option value={ExamType.QUIZ}>Kuis Harian / Quiz</option>
                             <option value={ExamType.UTS}>UTS (Tengah Semester)</option>
                             <option value={ExamType.UAS}>UAS (Akhir Semester)</option>
                         </select>
@@ -538,7 +633,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                 </div>
                 {/* Manual Input */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border">
-                   <h3 className="font-bold text-sm mb-2">Input Manual / Edit Soal</h3>
+                   <h3 className="font-bold text-sm mb-2">{editingQuestionIndex !== null ? 'Edit Soal (Mode Edit)' : 'Input Manual Soal Baru'}</h3>
                    <textarea className="w-full p-2 border rounded mb-2" placeholder="Pertanyaan" value={qText} onChange={e=>setQText(e.target.value)} />
                    <div className="flex gap-2 mb-2">
                       <select className="border p-1 rounded" value={qType} onChange={e=>setQType(e.target.value as any)}>
@@ -551,7 +646,17 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                       <div key={i} className="flex gap-1 mb-1"><input type="radio" checked={qCorrect===i} onChange={()=>setQCorrect(i)} /><input className="border w-full p-1 text-sm" value={o} onChange={e=>{const n=[...qOptions];n[i]=e.target.value;setQOptions(n)}} placeholder={`Opsi ${i+1}`} /></div>
                    ))}
                    {qType === QuestionType.ESSAY && <textarea className="w-full border p-2 mb-2 bg-yellow-50 text-sm" placeholder="Kunci Jawaban (Untuk AI)" value={qRefAnswer} onChange={e=>setQRefAnswer(e.target.value)} />}
-                   <button onClick={addQuestion} className="w-full bg-gray-100 p-2 rounded text-sm font-bold hover:bg-gray-200">Tambah ke Draft / Update Soal</button>
+                   
+                   <div className="flex gap-2 mt-2">
+                       <button onClick={addQuestion} className={`flex-1 p-2 rounded text-sm font-bold transition-colors ${editingQuestionIndex !== null ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                           {editingQuestionIndex !== null ? 'Update Soal' : 'Tambah ke Draft'}
+                       </button>
+                       {editingQuestionIndex !== null && (
+                           <button onClick={clearQuestionForm} className="px-4 bg-red-100 text-red-600 rounded text-sm font-bold hover:bg-red-200 border border-red-200">
+                               Batal
+                           </button>
+                       )}
+                   </div>
                 </div>
              </div>
              <div className="lg:col-span-2">
@@ -561,7 +666,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                         {questions.length === 0 ? (
                            <div className="text-center text-gray-400 py-10">Belum ada soal. Upload PDF atau input manual.</div>
                         ) : questions.map((q,i)=>(
-                           <div key={i} className="mb-2 p-3 bg-white border rounded hover:shadow-sm relative group">
+                           <div key={i} className={`mb-2 p-3 bg-white border rounded hover:shadow-sm relative group ${editingQuestionIndex === i ? 'ring-2 ring-orange-300 border-orange-300' : ''}`}>
                               <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white px-2 py-1 rounded shadow-sm border">
                                   <button onClick={() => editQuestionInDraft(i)} className="text-blue-500 hover:text-blue-700 font-bold text-xs flex items-center gap-1">
                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
@@ -620,7 +725,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                                     <div className="text-xs text-gray-400">{sub.studentNim || 'No NIM'}</div>
                                  </div>
                                  <div className={`text-xs font-bold px-2 py-1 rounded ${sub.isGraded ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                                    {sub.totalScore}
+                                    {getNormalizedScore(sub.totalScore, sub.examId)}
                                  </div>
                               </div>
                            ))}
@@ -634,8 +739,12 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                                        <p className="text-sm text-gray-500">Dikumpulkan: {new Date(selectedSubmission.submittedAt).toLocaleString('id-ID')}</p>
                                     </div>
                                     <div className="text-right">
-                                       <div className="text-2xl font-bold text-green-600">{selectedSubmission.totalScore}</div>
-                                       <div className="text-xs text-gray-500">Total Nilai</div>
+                                       <div className="text-2xl font-bold text-green-600">
+                                          {getNormalizedScore(selectedSubmission.totalScore, selectedSubmission.examId)}
+                                          <span className="text-sm font-normal text-gray-400 ml-1">/ 100</span>
+                                       </div>
+                                       <div className="text-xs text-gray-500">Nilai Akhir</div>
+                                       <div className="text-xs text-gray-400">Poin Mentah: {selectedSubmission.totalScore}</div>
                                     </div>
                                  </div>
 
@@ -751,9 +860,10 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                                 <div className="font-bold text-gray-800 text-center">Belum Hadir / Offline</div>
                              </div>
                              <div className="p-2 overflow-y-auto flex-1">
-                                {allStudents.filter(s => ['NOT_STARTED', 'OFFLINE'].includes(getStudentStatus(s, liveMonitorExam.id).status)).map(s => (
-                                   <div key={s.id} className="text-sm p-3 border-b text-gray-400">
-                                      {s.name}
+                                {allStudents.filter(s => getStudentStatus(s, liveMonitorExam.id).status !== 'ACTIVE' && getStudentStatus(s, liveMonitorExam.id).status !== 'SUBMITTED').map(s => (
+                                   <div key={s.id} className="text-sm p-3 border-b text-gray-400 flex justify-between items-center">
+                                      <span>{s.name}</span>
+                                      <span className="text-[10px] bg-gray-100 px-2 rounded">Offline</span>
                                    </div>
                                 ))}
                              </div>

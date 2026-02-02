@@ -92,7 +92,7 @@ export default function App() {
                   BioMed Exam
                 </span>
                 <span className={`text-[10px] font-bold tracking-widest ${user.role === UserRole.ADMIN ? 'text-slate-400' : 'text-slate-500'}`}>
-                  UNKAHA SEMARANG {user.role === UserRole.ADMIN && '| ADMIN'}
+                  UNIVERSITAS KARYA HUSADA SEMARANG {user.role === UserRole.ADMIN && '| ADMIN'}
                 </span>
               </div>
             </div>

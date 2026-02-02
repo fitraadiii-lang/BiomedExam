@@ -9,6 +9,9 @@ interface ExamRunnerProps {
 }
 
 const MAX_VIOLATIONS = 3;
+// UPDATE: Interval diubah ke 10 detik agar hemat kuota Firebase Free Tier (20k writes/day)
+// 25 mhs * 60 menit / 10 detik = 9.000 writes (Aman)
+const HEARTBEAT_INTERVAL = 10000; 
 
 const shuffleArray = <T,>(array: T[]): T[] => {
     const arr = [...array];
@@ -103,12 +106,13 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
   // Live Session Heartbeat
   useEffect(() => {
     if (!hasStarted || isLocked || isTerminated) return;
-    updateLiveSession();
-    const interval = setInterval(updateLiveSession, 2000);
+    updateLiveSession(); // Initial update immediately
+    const interval = setInterval(updateLiveSession, HEARTBEAT_INTERVAL);
     return () => clearInterval(interval);
   }, [hasStarted, isLocked, isTerminated, violationCount, inputName]);
 
   const updateLiveSession = async () => {
+    // Only update to cloud, fire and forget
     DB.updateSession({
       examId: exam.id,
       studentId: user.id,
@@ -142,6 +146,7 @@ export const ExamRunner: React.FC<ExamRunnerProps> = ({ user, exam, onFinish }) 
     if (isTerminated || isLocked) return;
     setViolationCount(prev => {
       const newCount = prev + 1;
+      // Force update immediately on violation
       DB.updateSession({
         examId: exam.id,
         studentId: user.id,

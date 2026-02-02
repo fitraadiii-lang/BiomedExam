@@ -8,9 +8,14 @@ interface AuthProps {
   onLogin: () => void;
 }
 
-// Konfigurasi Super Admin & Kode Dosen
-const SUPER_ADMIN_EMAIL = 'fitraadi@unkaha.ac.id';
-const LECTURER_SECRET_CODE = 'UNKAHA'; // Kode rahasia untuk daftar jadi Dosen
+// Konfigurasi Super Admin (Server Pusat)
+const SUPER_ADMIN_EMAILS = [
+  'admin@unkaha.ac.id', 
+  'ujian_s1sainsbiomedis@stikesyahoedsmg.ac.id'
+];
+
+// Kode rahasia tetap UNKAHA
+const LECTURER_SECRET_CODE = 'UNKAHA'; 
 
 export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   const [loading, setLoading] = useState(false);
@@ -33,13 +38,13 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       
-      // 1. Cek Super Admin Hardcoded
-      if (user.email === SUPER_ADMIN_EMAIL) {
+      // 1. Cek Super Admin (Server Pusat) - Mendukung Multiple Email
+      if (user.email && SUPER_ADMIN_EMAILS.includes(user.email)) {
          // Force register/update as ADMIN
          const adminUser = await DB.register({
             id: user.uid,
             email: user.email,
-            name: user.displayName || 'Super Admin',
+            name: user.displayName || 'Super Admin Pusat',
             role: UserRole.ADMIN,
             avatarUrl: user.photoURL || undefined
          });
@@ -140,7 +145,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         <div className="absolute -bottom-20 -left-20 w-80 h-80 bg-green-600 rounded-full blur-[100px] opacity-20"></div>
         <div className="relative z-10">
            <div className="flex items-center gap-3 mb-6">
-             <div className="font-bold tracking-wider text-sm">UNIVERSITAS KARYA HUSADA</div>
+             <div className="font-bold tracking-wider text-sm">UNIVERSITAS KARYA HUSADA SEMARANG</div>
            </div>
            
            <h1 className="text-4xl md:text-5xl font-extrabold leading-tight mb-4">
@@ -153,10 +158,9 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         </div>
 
         <div className="relative z-10 mt-10 md:mt-0">
-           <div className="flex items-center gap-4 text-xs text-slate-500">
-             <span>&copy; 2024 TIM DOSEN ILMU BIOMEDIS UNKAHA</span>
-             <span>•</span>
-             <span>Versi 2.0 (Stable)</span>
+           {/* Footer Text - Single Line */}
+           <div className="text-xs text-slate-500">
+             &copy; 2024 TIM DOSEN ILMU BIOMEDIS UNIVERSITAS KARYA HUSADA SEMARANG • Versi 2.1
            </div>
         </div>
       </div>
