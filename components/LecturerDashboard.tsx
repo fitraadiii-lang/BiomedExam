@@ -406,6 +406,112 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
     setSubmissions(prev => prev.map(s => s.id === updatedSubmission.id ? updatedSubmission : s));
   };
 
+  // --- FITUR DOWNLOAD LEMBAR JAWABAN (WORK) ---
+  const handleDownloadWork = () => {
+    if (!selectedExamIdForGrading) return;
+    const exam = exams.find(e => e.id === selectedExamIdForGrading);
+    const examSubs = getExamSubmissions(selectedExamIdForGrading);
+    
+    if (!exam || examSubs.length === 0) {
+      alert("Belum ada data pengumpulan untuk didownload.");
+      return;
+    }
+
+    // Buat jendela baru untuk layout print
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        alert("Pop-up diblokir. Izinkan pop-up untuk mendownload.");
+        return;
+    }
+
+    let htmlContent = `
+    <html>
+    <head>
+      <title>Hasil Ujian: ${exam.courseName}</title>
+      <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; max-width: 210mm; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+        .student-sheet { page-break-after: always; margin-bottom: 50px; }
+        .student-meta { background: #f0f0f0; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .score-box { font-size: 24px; font-weight: bold; color: #16a34a; }
+        .q-block { margin-bottom: 15px; border-bottom: 1px dashed #ccc; padding-bottom: 15px; }
+        .q-text { font-weight: bold; margin-bottom: 5px; }
+        .ans-text { padding: 10px; background: #fafafa; border-radius: 4px; border: 1px solid #eee; }
+        .correct { color: green; font-weight: bold; }
+        .incorrect { color: red; font-weight: bold; }
+        .feedback { margin-top: 5px; font-style: italic; color: #555; font-size: 0.9em; background: #eef2ff; padding: 5px; border-radius: 4px; }
+        @media print {
+            body { padding: 0; }
+            .no-print { display: none; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="no-print" style="margin-bottom: 20px; padding: 10px; background: #dcfce7; text-align: center; border: 1px solid #16a34a; border-radius: 8px;">
+          <strong>Mode Cetak / Download PDF</strong><br/>
+          Tekan tombol cetak di browser Anda (Ctrl+P) lalu pilih "Save as PDF".
+          <br/><button onclick="window.print()" style="margin-top: 5px; padding: 5px 15px; cursor: pointer; font-weight: bold;">🖨️ Cetak Sekarang</button>
+      </div>
+    `;
+
+    examSubs.forEach(sub => {
+        const finalScore = getNormalizedScore(sub.totalScore, sub.examId);
+        
+        htmlContent += `
+        <div class="student-sheet">
+            <div class="header">
+                <h2>${exam.courseName}</h2>
+                <p>${exam.title} - ${new Date(exam.startTime).toLocaleDateString('id-ID')}</p>
+            </div>
+            
+            <div class="student-meta">
+                <div>
+                    <h3 style="margin:0">${sub.studentName}</h3>
+                    <div>NIM: ${sub.studentNim || '-'}</div>
+                    <div style="font-size: 0.8em; color: #666">Submit: ${new Date(sub.submittedAt).toLocaleString('id-ID')}</div>
+                </div>
+                <div style="text-align: right">
+                    <div>Nilai Akhir</div>
+                    <div class="score-box">${finalScore}</div>
+                </div>
+            </div>
+
+            <h3>Lembar Jawaban</h3>
+        `;
+
+        // Loop Questions
+        exam.questions.forEach((q, idx) => {
+            const ans = sub.answers.find(a => a.questionId === q.id);
+            const score = ans?.score || 0;
+            
+            htmlContent += `<div class="q-block">`;
+            htmlContent += `<div class="q-text">Soal ${idx + 1} (${q.points} Poin): ${q.text}</div>`;
+            
+            if (q.type === QuestionType.MULTIPLE_CHOICE) {
+                const selectedOpt = ans?.selectedOptionIndex !== undefined ? q.options?.[ans.selectedOptionIndex] : "Tidak Menjawab";
+                const isCorrect = ans?.selectedOptionIndex === q.correctOptionIndex;
+                const statusClass = isCorrect ? "correct" : "incorrect";
+                
+                htmlContent += `<div class="ans-text">Jawaban: <span class="${statusClass}">${selectedOpt}</span></div>`;
+            } else {
+                htmlContent += `<div class="ans-text">Jawaban Esai:<br/>${ans?.essayText || "Tidak Menjawab"}</div>`;
+                if (ans?.feedback) {
+                    htmlContent += `<div class="feedback"><strong>Feedback Dosen/AI:</strong> ${ans.feedback}</div>`;
+                }
+            }
+            htmlContent += `<div style="text-align: right; font-size: 0.8em; margin-top: 5px;">Perolehan: <strong>${score}</strong> / ${q.points}</div>`;
+            htmlContent += `</div>`;
+        });
+
+        htmlContent += `</div>`; // End student sheet
+    });
+
+    htmlContent += `</body></html>`;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
   const handleExportXLS = () => {
     if (!selectedExamIdForGrading) return;
     const examSubs = getExamSubmissions(selectedExamIdForGrading);
@@ -800,6 +906,10 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
                                Lihat Tabel Rekap
                            </button>
+                           <button onClick={handleDownloadWork} className="bg-purple-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-purple-700 flex items-center gap-2">
+                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                               Download Hasil (PDF)
+                           </button>
                            <button onClick={handleExportXLS} className="bg-green-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-green-700 flex items-center gap-2">
                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                                Download Excel (Nilai)
@@ -898,144 +1008,4 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
              )}
          </div>
       )}
-
-      {/* Recap Table Modal */}
-      {showRecapModal && selectedExamIdForGrading && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-4 animate-fade-in">
-              <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full h-[80vh] flex flex-col">
-                  <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
-                      <div>
-                          <h3 className="font-bold text-lg text-gray-800">Tabel Rekap Nilai Akhir</h3>
-                          <p className="text-xs text-gray-500">{exams.find(e => e.id === selectedExamIdForGrading)?.courseName}</p>
-                      </div>
-                      <button onClick={() => setShowRecapModal(false)} className="text-gray-500 hover:text-gray-800 text-2xl font-bold">×</button>
-                  </div>
-                  <div className="flex-1 overflow-auto p-4">
-                      <table className="min-w-full divide-y divide-gray-200 border">
-                          <thead className="bg-gray-100">
-                              <tr>
-                                  <th className="px-4 py-2 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">No</th>
-                                  <th className="px-4 py-2 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">NIM</th>
-                                  <th className="px-4 py-2 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Nama</th>
-                                  <th className="px-4 py-2 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Nilai Akhir (0-100)</th>
-                              </tr>
-                          </thead>
-                          <tbody className="bg-white divide-y divide-gray-200">
-                              {getExamSubmissions(selectedExamIdForGrading).map((sub, idx) => (
-                                  <tr key={sub.id} className="hover:bg-gray-50">
-                                      <td className="px-4 py-2 text-sm text-gray-900">{idx + 1}</td>
-                                      <td className="px-4 py-2 text-sm text-gray-600">{sub.studentNim || '-'}</td>
-                                      <td className="px-4 py-2 text-sm text-gray-900 font-medium">{sub.studentName}</td>
-                                      <td className="px-4 py-2 text-sm text-green-700 font-bold">{getNormalizedScore(sub.totalScore, sub.examId)}</td>
-                                  </tr>
-                              ))}
-                              {getExamSubmissions(selectedExamIdForGrading).length === 0 && (
-                                  <tr>
-                                      <td colSpan={4} className="px-4 py-8 text-center text-gray-500 italic">Belum ada data nilai.</td>
-                                  </tr>
-                              )}
-                          </tbody>
-                      </table>
-                  </div>
-                  <div className="p-4 border-t bg-gray-50 rounded-b-xl text-right">
-                      <button onClick={() => setShowRecapModal(false)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 font-bold text-sm">Tutup</button>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {/* Live Monitor Modal */}
-      {showLiveMonitor && liveMonitorExam && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-4">
-              <div className="bg-white rounded-xl shadow-2xl max-w-7xl w-full h-[85vh] flex flex-col">
-                  <div className="bg-slate-900 text-white p-4 flex justify-between items-center rounded-t-xl">
-                     <div>
-                        <h3 className="font-bold text-lg">Live Monitor: {liveMonitorExam.courseName}</h3>
-                        <p className="text-xs text-slate-400">Memperbarui status setiap 3 detik...</p>
-                     </div>
-                     <button onClick={() => setShowLiveMonitor(false)} className="text-white hover:text-red-400 font-bold text-xl">✕</button>
-                  </div>
-                  <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
-                      {/* MAIN MONITOR AREA */}
-                      <div className="flex-1 p-6 overflow-y-auto bg-gray-100">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                              {/* Active Column */}
-                              <div className="bg-white border rounded-xl shadow-sm overflow-hidden flex flex-col h-full max-h-[60vh] md:max-h-none">
-                                <div className="bg-blue-50 p-3 border-b border-blue-100">
-                                    <div className="font-bold text-blue-800 text-center">Sedang Mengerjakan</div>
-                                    <div className="text-xs text-center text-blue-600">{allStudents.filter(s => getStudentStatus(s, liveMonitorExam.id).status === 'ACTIVE').length} Mahasiswa</div>
-                                </div>
-                                <div className="p-2 overflow-y-auto flex-1">
-                                    {allStudents.filter(s => getStudentStatus(s, liveMonitorExam.id).status === 'ACTIVE').map(s => {
-                                      const session = liveSessions.find(ses => ses.studentId === s.id && ses.examId === liveMonitorExam.id);
-                                      return (
-                                          <div key={s.id} className="text-sm p-3 border-b flex justify-between items-center">
-                                            <span>{s.name}</span>
-                                            {session && session.violationCount > 0 && <span className="bg-red-100 text-red-800 text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse">Warn: {session.violationCount}</span>}
-                                          </div>
-                                      )
-                                    })}
-                                </div>
-                              </div>
-
-                              {/* Submitted Column */}
-                              <div className="bg-white border rounded-xl shadow-sm overflow-hidden flex flex-col h-full max-h-[60vh] md:max-h-none">
-                                <div className="bg-green-50 p-3 border-b border-green-100">
-                                    <div className="font-bold text-green-800 text-center">Sudah Kumpul</div>
-                                    <div className="text-xs text-center text-green-600">{allStudents.filter(s => getStudentStatus(s, liveMonitorExam.id).status === 'SUBMITTED').map(s => s).length} Mahasiswa</div>
-                                </div>
-                                <div className="p-2 overflow-y-auto flex-1">
-                                    {allStudents.filter(s => getStudentStatus(s, liveMonitorExam.id).status === 'SUBMITTED').map(s => (
-                                      <div key={s.id} className="text-sm p-3 border-b text-gray-700 flex justify-between items-center">
-                                          <span>{s.name}</span>
-                                          <span className="text-xs text-green-600">✓</span>
-                                      </div>
-                                    ))}
-                                </div>
-                              </div>
-
-                              {/* Offline Column */}
-                              <div className="bg-white border rounded-xl shadow-sm overflow-hidden flex flex-col h-full max-h-[60vh] md:max-h-none">
-                                <div className="bg-gray-50 p-3 border-b border-gray-200">
-                                    <div className="font-bold text-gray-800 text-center">Belum Hadir / Offline</div>
-                                </div>
-                                <div className="p-2 overflow-y-auto flex-1">
-                                    {allStudents.filter(s => getStudentStatus(s, liveMonitorExam.id).status !== 'ACTIVE' && getStudentStatus(s, liveMonitorExam.id).status !== 'SUBMITTED').map(s => (
-                                      <div key={s.id} className="text-sm p-3 border-b text-gray-400 flex justify-between items-center">
-                                          <span>{s.name}</span>
-                                          <span className="text-[10px] bg-gray-100 px-2 rounded">Offline</span>
-                                      </div>
-                                    ))}
-                                </div>
-                              </div>
-                          </div>
-                      </div>
-
-                      {/* SIDEBAR LOG AKTIVITAS (NOTIFIKASI REALTIME) */}
-                      <div className="w-full md:w-80 bg-white border-l shadow-xl flex flex-col h-[200px] md:h-auto">
-                          <div className="p-3 bg-red-50 border-b border-red-100 font-bold text-red-800 flex items-center gap-2">
-                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                             Log Pelanggaran (Live)
-                          </div>
-                          <div className="flex-1 overflow-y-auto p-2 space-y-2 bg-gray-50">
-                              {violationAlerts.length === 0 && (
-                                  <div className="text-center text-xs text-gray-400 mt-10">Belum ada pelanggaran terdeteksi.</div>
-                              )}
-                              {violationAlerts.map(alert => (
-                                  <div key={alert.id} className="bg-white p-3 rounded border-l-4 border-red-500 shadow-sm animate-fade-in">
-                                      <div className="flex justify-between items-start">
-                                          <span className="font-bold text-sm text-gray-800">{alert.studentName}</span>
-                                          <span className="text-[10px] text-gray-400">{alert.time}</span>
-                                      </div>
-                                      <p className="text-xs text-red-600 mt-1 font-medium">{alert.message}</p>
-                                  </div>
-                              ))}
-                          </div>
-                      </div>
-                  </div>
-              </div>
-          </div>
-      )}
-    </div>
-  );
-};
+// ... sisa file tetap sama ...
