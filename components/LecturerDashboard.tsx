@@ -64,6 +64,10 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
   // Import State
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // AI Import Config State
+  const [aiMode, setAiMode] = useState<'EXTRACT' | 'GENERATE'>('EXTRACT');
+  const [aiMcCount, setAiMcCount] = useState(5);
+  const [aiEssayCount, setAiEssayCount] = useState(0);
 
   const isAdmin = user.role === UserRole.ADMIN;
 
@@ -500,6 +504,14 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
+    
+    // VALIDASI INPUT JIKA MODE GENERATE
+    if (aiMode === 'GENERATE' && (aiMcCount + aiEssayCount) <= 0) {
+        alert("Mohon isi jumlah soal Pilihan Ganda atau Essay (minimal 1).");
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+    }
+
     const fileList = Array.from(e.target.files) as File[];
     
     setIsImporting(true);
@@ -518,12 +530,18 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
       });
 
       const processedFiles = await Promise.all(filePromises);
-      const generatedQuestions = await AIService.generateQuestionsFromDocument(processedFiles);
+      
+      const generatedQuestions = await AIService.generateQuestionsFromDocument(processedFiles, {
+          mode: aiMode,
+          mcCount: aiMcCount,
+          essayCount: aiEssayCount
+      });
+      
       setQuestions([...questions, ...generatedQuestions]);
-      alert(`Berhasil mengimpor ${generatedQuestions.length} soal dari dokumen.`);
+      alert(`Berhasil! ${generatedQuestions.length} soal ditambahkan ke draft.`);
     } catch (error: any) {
       console.error(error);
-      alert(`Gagal memproses file: ${error.message}`);
+      alert(`Gagal memproses AI: ${error.message}`);
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -654,12 +672,47 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ user }) =>
                        <label className="text-xs font-bold block mb-1">Selesai</label>
                        <input type="datetime-local" className="w-full p-2 border rounded" value={endTime} onChange={e => setEndTime(e.target.value)} />
                     </div>
-                    {/* Import AI */}
+                    
+                    {/* Import AI Section */}
                     <div className="bg-blue-50 p-4 rounded border border-blue-200">
-                        <p className="text-sm text-blue-800 mb-2 font-bold">Import Soal (AI)</p>
-                        <button onClick={() => fileInputRef.current?.click()} disabled={isImporting} className="w-full bg-white border text-blue-600 py-1 rounded text-sm hover:bg-blue-50">
-                           {isImporting ? 'Sedang Memproses PDF...' : 'Upload Bank Soal (PDF/Img)'}
+                        <div className="flex items-center gap-2 mb-3">
+                           <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+                           <p className="text-sm text-blue-800 font-bold">Magic Import (AI)</p>
+                        </div>
+                        
+                        <div className="mb-3">
+                            <label className="text-xs text-blue-700 block mb-1 font-semibold">Pilih Sumber File:</label>
+                            <div className="flex gap-2">
+                                <label className={`flex-1 text-center cursor-pointer p-2 rounded text-xs border ${aiMode === 'EXTRACT' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300'}`}>
+                                    <input type="radio" name="aiMode" value="EXTRACT" checked={aiMode==='EXTRACT'} onChange={() => setAiMode('EXTRACT')} className="hidden" />
+                                    File Soal<br/><span className="text-[9px] opacity-80">(Ekstrak)</span>
+                                </label>
+                                <label className={`flex-1 text-center cursor-pointer p-2 rounded text-xs border ${aiMode === 'GENERATE' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300'}`}>
+                                    <input type="radio" name="aiMode" value="GENERATE" checked={aiMode==='GENERATE'} onChange={() => setAiMode('GENERATE')} className="hidden" />
+                                    File Materi<br/><span className="text-[9px] opacity-80">(Buat Baru)</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        {aiMode === 'GENERATE' && (
+                            <div className="mb-3 grid grid-cols-2 gap-2 animate-fade-in bg-white p-2 rounded border border-blue-100">
+                                <div>
+                                    <label className="text-[10px] block text-gray-500">Jml Pilihan Ganda</label>
+                                    <input type="number" min="0" className="w-full border p-1 text-sm rounded" value={aiMcCount} onChange={e => setAiMcCount(Number(e.target.value))} />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] block text-gray-500">Jml Essay</label>
+                                    <input type="number" min="0" className="w-full border p-1 text-sm rounded" value={aiEssayCount} onChange={e => setAiEssayCount(Number(e.target.value))} />
+                                </div>
+                            </div>
+                        )}
+
+                        <button onClick={() => fileInputRef.current?.click()} disabled={isImporting} className="w-full bg-white border text-blue-600 py-2 rounded text-sm hover:bg-blue-50 font-medium transition-colors shadow-sm">
+                           {isImporting ? '⏳ Sedang Memproses...' : (aiMode === 'EXTRACT' ? '📂 Upload File Soal (PDF/Img)' : '📚 Upload File Materi (PPT/PDF)')}
                         </button>
+                        <p className="text-[10px] text-blue-400 mt-2 text-center">
+                            {aiMode === 'EXTRACT' ? 'AI akan menyalin soal persis dari dokumen.' : 'AI akan membuat soal baru berdasarkan teori di dokumen.'}
+                        </p>
                         <input type="file" hidden ref={fileInputRef} multiple onChange={handleFileChange} />
                     </div>
                 </div>

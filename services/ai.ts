@@ -28,6 +28,12 @@ const parseJSONSafely = (text: string) => {
   }
 };
 
+export interface AIImportConfig {
+  mode: 'EXTRACT' | 'GENERATE';
+  mcCount?: number;
+  essayCount?: number;
+}
+
 export const AIService = {
   gradeEssay: async (
     questionText: string,
@@ -91,7 +97,8 @@ export const AIService = {
   },
 
   generateQuestionsFromDocument: async (
-    files: { data: string; mimeType: string }[]
+    files: { data: string; mimeType: string }[],
+    config: AIImportConfig
   ): Promise<Question[]> => {
     try {
       // Create parts for all uploaded files
@@ -102,25 +109,51 @@ export const AIService = {
         },
       }));
 
-      const promptText = `
-          Analyze the attached document(s) (exam papers, lecture notes, or question banks) for Biomedical Science.
-          EXTRACT ALL QUESTIONS found in the documents. 
-          
-          If the document is a theory module, GENERATE high-quality exam questions based on the content.
-          Mix between Multiple Choice and Essay questions as appropriate based on the content.
+      let promptText = "";
 
+      if (config.mode === 'EXTRACT') {
+          // MODE 1: EXTRACT (Existing Logic)
+          promptText = `
+              Analyze the attached document(s) which contain existing exam questions (Question Bank).
+              EXTRACT ALL QUESTIONS found in the documents exactly as they appear. 
+              
+              If the document contains answers, map them to 'correctOptionIndex' or 'referenceAnswer'.
+              If no answers are marked in the document, try to solve them yourself.
+          `;
+      } else {
+          // MODE 2: GENERATE FROM MATERIAL
+          const mcCount = config.mcCount || 0;
+          const essayCount = config.essayCount || 0;
+          
+          promptText = `
+              Analyze the attached teaching material/module/textbook.
+              ACT AS A PROFESSOR. Create NEW exam questions based on the key concepts in this material.
+              
+              REQUIREMENTS:
+              - Generate exactly ${mcCount} Multiple Choice Questions.
+              - Generate exactly ${essayCount} Essay/Description Questions.
+              - Total Questions: ${mcCount + essayCount}.
+              - Questions must be academic, challenging, and relevant to the material provided.
+              - Language: Indonesian (Bahasa Indonesia).
+          `;
+      }
+
+      // Common JSON formatting rules
+      promptText += `
           IMPORTANT JSON FORMATTING RULES:
           1. Return purely the JSON array.
           2. Escape backslashes properly (e.g. \\alpha -> \\\\alpha).
           
           For Multiple Choice Questions:
-          - Extract the question text.
-          - Extract all options.
+          - Extract/Generate the question text.
+          - Provide 4-5 options.
           - Determine the correct option index (0-based).
+          - Set 'type' to '${QuestionType.MULTIPLE_CHOICE}'.
           
           For Essay/Description Questions:
-          - Extract the question text.
-          - Generate a brief "Reference Answer" based on the context to help with future grading.
+          - Extract/Generate the question text.
+          - Generate a brief "Reference Answer" based on the context.
+          - Set 'type' to '${QuestionType.ESSAY}'.
           
           Assign a default point value of 10 for each question.
       `;
@@ -167,7 +200,7 @@ export const AIService = {
 
     } catch (error) {
       console.error("AI Import Error:", error);
-      throw new Error("Gagal membaca file atau format data tidak valid.");
+      throw new Error("Gagal memproses AI. Pastikan file terbaca jelas.");
     }
   },
 };
